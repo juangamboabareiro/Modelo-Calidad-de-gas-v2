@@ -153,7 +153,19 @@ def io_plantas(matriz_inyecciones, calcular_retenidos, tabla_total_flujos_direct
             tabla_plantas = pd.concat([tabla_plantas, pd.DataFrame(filas)], ignore_index=True)
 
 
-    tabla_plantas['Volumen_relativo'] = tabla_plantas['Volumen_inyectado']/(tabla_plantas['Volumen_inyectado'].values.sum())
+    # Pool vacio = planta que este periodo no recibe gas (p. ej. una agregada
+    # que vive de la derivacion de otra y la otra no tuvo sobrante, o cuyo
+    # ducto todavia no rutea nada). Es un estado LEGITIMO del escenario: tiene
+    # que dar planta en cero, no ZeroDivisionError. Volumen_relativo=0 deja
+    # gas_rico_IN en ceros y todo lo de abajo (residual, retenidos, LGN) sale
+    # en cero solo.
+    volumen_total = float(tabla_plantas['Volumen_inyectado'].values.sum())
+    if volumen_total > 0:
+        tabla_plantas['Volumen_relativo'] = tabla_plantas['Volumen_inyectado'] / volumen_total
+    else:
+        print(f"[io_plantas:{nombre_planta}] pool vacio este periodo: "
+              "la planta queda en cero")
+        tabla_plantas['Volumen_relativo'] = 0.0
 
     tabla_plantas = tabla_plantas.fillna(0)
 

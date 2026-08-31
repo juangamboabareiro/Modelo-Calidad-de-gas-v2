@@ -149,7 +149,11 @@ def modelar_planta(planta, comunes, vol_disponible=None, derivaciones=None):
     if vol_disponible is None:
         vol_disponible = vol_pool if planta.toma_volumen_del_pool else 0.0
 
-    lgn_unitario = calcular_lgn_unitario(vol_pool, retenidos_vol_pool)
+    # Pool vacio: no hay gas de referencia para calcular LGN por unidad, y
+    # adentro de `calcular_lgn_unitario` se divide por vol_pool. Cero es la
+    # respuesta correcta ademas de la segura: sin gas no hay LGN.
+    lgn_unitario = (calcular_lgn_unitario(vol_pool, retenidos_vol_pool)
+                    if vol_pool > 0 else 0.0)
 
     if planta.activa:
         vol_maximo = calcular_volumen_maximo(
