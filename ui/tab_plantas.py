@@ -56,10 +56,16 @@ from ui.gasoductos_editor import (
     DISPONIBLE as GASODUCTOS_DISPONIBLE,
     MOTIVO as ERROR_GASODUCTOS,
 )
+from ui.asistente_escenario import panel_asistente, consumir_orden
 
 
 CLAVE_RESULTADO = "sandbox_resultado"
 CLAVE_INFORME = "sandbox_informe_ductos"
+
+# La serie temporal del ESCENARIO, que consume el tab Graphs (app.py se la
+# pasa a panel_graphs). Misma forma que la serie oficial.
+CLAVE_SERIE = "serie_sandbox"
+CLAVE_SERIE_FALLOS = "serie_sandbox_fallos"
 
 # Misma clave que lee `ui/mapa.py`. Si cambia alla, cambia aca.
 CLAVE_RED_MAPA = "sandbox_red_gasoductos"
@@ -77,7 +83,7 @@ COLUMNAS_VOLUMEN = ["vol_disponible", "vol_maximo", "vol_asignado",
 BASE = ["TTY - TBX", "TTY - Dew Point", "MEGA"]
 
 
-def panel_tab_plantas(resultados, params, factor_mm=1000.0):
+def panel_tab_plantas(resultados, params, factor_mm=1000.0, serie_ctx=None):
     """Dibuja el tab completo.
 
     Parameters
@@ -86,6 +92,10 @@ def panel_tab_plantas(resultados, params, factor_mm=1000.0):
         Lo que devuelve `ejecutar_pipeline`, con `comunes` y `retenidos_rtp`.
     params : dict | module
         Las capacidades y topes de la sidebar. `registro_base` acepta los dos.
+    serie_ctx : dict | None
+        {"periodos": [...], "correr": callable(registro, intervenciones)} para
+        calcular la serie del escenario con el MISMO rango de la sidebar. None
+        deshabilita el botón (rango vacío o app vieja).
     """
 
     st.subheader("Plantas (sandbox)")
@@ -115,7 +125,8 @@ def panel_tab_plantas(resultados, params, factor_mm=1000.0):
 
     with col_editor:
         _fragmento_editor(retenidos_rtp, compuestos, params, tbx_en_servicio,
-                          factor_mm, comunes)
+                          factor_mm, comunes, serie_ctx,
+                          resultados.get("nombres_areas") or {})
 
     with col_salida:
         guardado = st.session_state.get(CLAVE_RESULTADO)
@@ -225,11 +236,13 @@ def _publicar_red_sandbox(yac):
 
 
 def _cuerpo_editor(retenidos_rtp, compuestos, params, tbx_en_servicio,
-                   factor_mm, comunes):
-    """Editor + botón de correr. Se envuelve en un fragment (ver abajo)."""
+                   factor_mm, comunes, serie_ctx=None, nombres_areas=None):
+    """Editor + botones de correr. Se envuelve en un fragment (ver abajo)."""
 
-    sub_plantas, sub_ductos, sub_escenarios = st.tabs(
-        ["Plantas", "Gasoductos", "Escenarios"])
+    sub_asistente, sub_plantas, sub_ductos, sub_escenarios = st.tabs(
+        ["🤖 Asistente", "Plantas", "Gasoductos", "Escenarios"])
+
+    meses_serie = len(serie_ctx["periodos"]) if serie_ctx else 0
 
     with sub_plantas:
         registro, errores, _ = panel_plantas(
@@ -239,6 +252,13 @@ def _cuerpo_editor(retenidos_rtp, compuestos, params, tbx_en_servicio,
             tbx_en_servicio=tbx_en_servicio,
             factor_mm=factor_mm,
         )
+
+    with sub_asistente:
+        # DESPUES de panel_plantas a nivel código (los tabs se dibujan igual):
+        # necesita el registro ya inicializado. Muta registro/intervenciones y
+        # deja la orden de correr en session_state.
+        panel_asistente(registro, compuestos, comunes, nombres_areas,
+                        factor_mm=factor_mm, meses_serie=meses_serie)
 
     with sub_ductos:
         intervenciones = panel_gasoductos(
@@ -251,19 +271,56 @@ def _cuerpo_editor(retenidos_rtp, compuestos, params, tbx_en_servicio,
     with sub_escenarios:
         panel_escenarios(registro)
 
+    # La orden del asistente equivale a apretar los botones de abajo: un solo
+    # camino de ejecución, el asistente no corre nada por su cuenta.
+    orden = consumir_orden()
+
     st.divider()
     correr = st.button(
         "Resolver cascada", type="primary", **ancho(),
         disabled=bool(errores), key="btn_correr_sandbox")
 
+    correr_serie = False
+    if serie_ctx:
+        correr_serie = st.button(
+            f"Calcular serie del escenario ({meses_serie} meses)", **ancho(),
+            disabled=bool(errores), key="btn_serie_sandbox",
+            help="Corre el escenario mes a mes con el rango de la sidebar "
+                 "(sección 9) y lo deja disponible en el tab **Graphs**, al "
+                 "lado de la serie oficial. Son N corridas completas: tarda "
+                 "lo mismo que la serie oficial.")
+    else:
+        st.caption("Para ver el escenario en **Graphs**, definí un rango "
+                   "válido en la sidebar (sección 9. Serie temporal).")
+
     if errores:
         st.caption("Corregí los errores de arriba para poder correr.")
+    elif orden:
+        correr = True
+        correr_serie = correr_serie or (orden == "resolver_y_serie" and bool(serie_ctx))
 
     _barra_acciones(registro, factor_mm)
 
-    if not correr:
+    if not (correr or correr_serie):
         return
 
+    # La cascada puntual corre SIEMPRE que se pida algo: es barata, alimenta
+    # el control/impacto de la derecha, y la serie sin la puntual dejaría la
+    # salida del tab desactualizada respecto de lo que muestran los Graphs.
+    if not _resolver_y_guardar(registro, intervenciones, comunes, compuestos):
+        return
+
+    if correr_serie:
+        _correr_serie_escenario(serie_ctx, registro, intervenciones)
+
+    # Rerun de APP entero (no del fragment): la salida se dibuja afuera y tiene
+    # que enterarse del resultado nuevo. Es el único momento en que se paga el
+    # redibujado completo, y pasa una vez por corrida, no por cada checkbox.
+    st.rerun()
+
+
+def _resolver_y_guardar(registro, intervenciones, comunes, compuestos) -> bool:
+    """La cascada puntual del sandbox. Devuelve True si terminó bien."""
     with st.spinner("Resolviendo…"):
         try:
             comunes_efectivo, informe = _comunes_con_ductos(
@@ -273,15 +330,27 @@ def _cuerpo_editor(retenidos_rtp, compuestos, params, tbx_en_servicio,
             st.session_state.pop(CLAVE_RESULTADO, None)
             st.error(f"La cascada falló: {type(e).__name__}: {e}")
             st.exception(e)
-            return
+            return False
 
     st.session_state[CLAVE_RESULTADO] = (plantas, flujos)
     st.session_state[CLAVE_INFORME] = informe
+    return True
 
-    # Rerun de APP entero (no del fragment): la salida se dibuja afuera y tiene
-    # que enterarse del resultado nuevo. Es el único momento en que se paga el
-    # redibujado completo, y pasa una vez por corrida, no por cada checkbox.
-    st.rerun()
+
+def _correr_serie_escenario(serie_ctx, registro, intervenciones):
+    """La serie del escenario, mes a mes. El resultado lo consume Graphs."""
+    try:
+        serie, fallos = serie_ctx["correr"](registro, intervenciones)
+    except Exception as e:
+        st.session_state.pop(CLAVE_SERIE, None)
+        st.session_state.pop(CLAVE_SERIE_FALLOS, None)
+        st.error(f"La serie del escenario falló: {type(e).__name__}: {e}")
+        st.exception(e)
+        return
+
+    st.session_state[CLAVE_SERIE] = serie
+    st.session_state[CLAVE_SERIE_FALLOS] = fallos
+    st.toast("Serie del escenario lista: mirala en el tab Graphs.", icon="📈")
 
 
 # `st.fragment` (Streamlit >= 1.37) hace que tocar un widget del editor

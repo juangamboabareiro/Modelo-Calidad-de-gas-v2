@@ -1564,6 +1564,128 @@ def ejecutar_serie(path, params, periodos):
     return serie, fallos
 
 
+def ejecutar_serie_sandbox(path, params, periodos, registro, intervenciones,
+                           referencia):
+    """La serie temporal DEL ESCENARIO del sandbox, para el tab Graphs.
+
+    Misma forma que `ejecutar_serie` (dict plantas/areas/pool/mezcla, mismas
+    columnas), pero cada mes se resuelve con `resolver_cascada` sobre el
+    registro del usuario + las intervenciones de ductos, en vez de la cascada
+    oficial. Asi los Graphs pueden mostrar el escenario en el tiempo.
+
+    EL CONTROL, EXTENDIDO A LA SERIE
+    --------------------------------
+    Con el registro sin tocar, esta serie TIENE que dar igual a la oficial.
+    Para eso las plantas base NO se congelan con las capacidades del periodo
+    actual: cada mes se re-siembran con los parametros de ESE mes (ampliaciones
+    incluidas, igual que la serie oficial) y encima se aplica SOLO el diff que
+    el usuario efectivamente toco (ver `pipeline.plantas.serie_escenario`).
+    Capacidad no tocada = sigue las ampliaciones; tocada = queda como la puso.
+
+    `referencia` es el dict de resultados de la corrida actual: aporta la
+    semilla contra la que se calcula el diff (los MISMOS `params_efectivos` y
+    `retenidos_rtp` con los que `inicializar` sembro el registro).
+    """
+    from pipeline.plantas.cascada import resolver_cascada
+    from pipeline.plantas.registro import registro_base, INFINITO as _INF
+    from pipeline.plantas.serie_escenario import (
+        diff_contra_semilla, registro_para_periodo)
+    from ui.tab_plantas import _comunes_con_ductos
+
+    compuestos_ref = referencia["comunes"]["COMPUESTOS"]
+    semilla_ref = registro_base(
+        referencia.get("params_efectivos", params), referencia["retenidos_rtp"],
+        compuestos_ref, bool(referencia.get("tbx_en_servicio", True)))
+    overrides, extras = diff_contra_semilla(registro, semilla_ref)
+
+    filas_plantas, filas_areas, filas_pool, filas_mezcla = [], [], [], []
+    fallos = []
+    barra = st.sidebar.progress(0.0, text="Serie del escenario...")
+
+    for i, periodo in enumerate(periodos, start=1):
+        etiqueta = pd.Timestamp(periodo).strftime("%m-%Y")
+        barra.progress(i / len(periodos),
+                       text=f"Escenario: {etiqueta} ({i}/{len(periodos)})")
+
+        params_periodo = {**params, "PERIODO_CONSIDERADO": pd.Timestamp(periodo)}
+        try:
+            resultado = ejecutar_pipeline(
+                path, params_periodo, guardar_csvs=False, silencioso=True)
+
+            # `ejecutar_pipeline` acaba de recargar la config para este mes:
+            # este import trae el modulo ya recargado, con sus constantes.
+            import domain.ctes_gas as ctes
+
+            comunes_mes, _ = _comunes_con_ductos(
+                resultado["comunes"], intervenciones,
+                resultado["comunes"]["COMPUESTOS"])
+
+            registro_mes = registro_para_periodo(
+                params_del_mes=resultado["params_efectivos"],
+                retenidos_rtp=resultado["retenidos_rtp"],
+                compuestos=resultado["comunes"]["COMPUESTOS"],
+                tbx_en_servicio=bool(resultado.get("tbx_en_servicio", True)),
+                overrides=overrides, extras=extras)
+
+            plantas_sbx, _flujos = resolver_cascada(registro_mes, comunes_mes)
+        except Exception as e:
+            fallos.append((periodo, str(e)))
+            continue
+
+        propiedades = comunes_mes["propiedades"]
+        compuestos = comunes_mes["COMPUESTOS"]
+
+        # Lo que `_fila_serie` espera y `resolver_cascada` no trae: las
+        # capacidades (viven en la config de la planta) y las propiedades del
+        # gas rico/residual (misma cuenta que en `ejecutar_pipeline`).
+        for nombre, datos in plantas_sbx.items():
+            cfg = registro_mes[nombre]
+            datos["capacidad_evacuacion"] = (
+                None if cfg.capacidad_evacuacion in (None, _INF)
+                else float(cfg.capacidad_evacuacion))
+            datos["capacidad_ingreso"] = cfg.capacidad_ingreso
+            datos["propiedades_rico"] = _props_croma(
+                datos.get("gas_rico_IN"), propiedades, compuestos, ctes)
+            datos["propiedades_residual"] = _props_croma(
+                datos.get("gas_residual_OUT"), propiedades, compuestos, ctes)
+
+            filas_plantas.append(_fila_serie(periodo, nombre, datos))
+
+        nombres = resultado.get("nombres_areas") or {}
+
+        # Las tablas de areas salen del `comunes` YA intervenido: si un ducto
+        # nuevo redistribuye un area, la lamina de produccion lo muestra.
+        shim_areas = {"tablas": {
+            "Total Yacimientos": comunes_mes.get("tabla_total_yacimientos"),
+            "Total Detalles HUBs": (resultado.get("tablas") or {}).get(
+                "Total Detalles HUBs"),
+            "Total Flujos Directos": comunes_mes.get("tabla_total_flujos_directos"),
+            "Total HUBs (ruteo)": comunes_mes.get("tabla_total_hubs"),
+        }}
+        filas_areas.extend(_filas_areas_serie(periodo, shim_areas, nombres))
+        filas_pool.extend(_filas_pool_serie(
+            periodo, {"plantas": plantas_sbx}, nombres))
+
+        # Mismo esquema garantizado que la serie oficial: la fila siempre
+        # lleva todas las columnas aunque la mezcla no se haya podido armar.
+        mezcla = _mezcla_a_transporte(plantas_sbx, propiedades, compuestos, ctes)
+        filas_mezcla.append({
+            "periodo": pd.Timestamp(periodo).normalize(),
+            "vol_mega": None, "vol_tty": None,
+            "vol_directo_a_gasoducto": None, "pcs": None, "iw": None,
+            **(mezcla or {}),
+        })
+
+    barra.empty()
+    serie = {
+        "plantas": pd.DataFrame(filas_plantas),
+        "areas": pd.DataFrame(filas_areas),
+        "pool": pd.DataFrame(filas_pool),
+        "mezcla": pd.DataFrame(filas_mezcla),
+    }
+    return serie, fallos
+
+
 if run:
     registro = []
     try:
@@ -1866,7 +1988,9 @@ with tab_graphs:
     _render_seguro("Graphs", panel_graphs, resultados,
                    serie=st.session_state.get("serie"),
                    fallos=st.session_state.get("serie_fallos"),
-                   unidad=unidad_volumen)
+                   unidad=unidad_volumen,
+                   serie_sandbox=st.session_state.get("serie_sandbox"),
+                   fallos_sandbox=st.session_state.get("serie_sandbox_fallos"))
 
 with tab_tablas:
     _render_seguro("Tablas totales", panel_tablas, resultados)
@@ -1878,8 +2002,21 @@ with tab_sandbox:
     # El sandbox RE-MODELA la fisica desde comunes: necesita el original STD.
     st.caption("El sandbox re-modela la física y trabaja siempre en "
                "**MMm³/d STD**, independiente del selector de unidad.")
+
+    # El contexto para la serie del escenario: el rango es EL MISMO de la
+    # sidebar (una sola definición de "la serie") y el callable encapsula
+    # path/params/referencia para que el tab no tenga que conocerlos.
+    def _correr_serie_sandbox(registro, intervenciones,
+                              _ref=resultados_fisicos):
+        return ejecutar_serie_sandbox(
+            input_path, PARAMS, periodos_serie, registro, intervenciones, _ref)
+
+    _serie_ctx = ({"periodos": periodos_serie, "correr": _correr_serie_sandbox}
+                  if periodos_serie else None)
+
     _render_seguro("Plantas (sandbox)", panel_tab_plantas, resultados_fisicos,
-                   resultados_fisicos.get("params_efectivos", PARAMS), FACTOR_MM)
+                   resultados_fisicos.get("params_efectivos", PARAMS), FACTOR_MM,
+                   serie_ctx=_serie_ctx)
 
 
 def _mostrar_planta_contenido(nombre_planta, datos):

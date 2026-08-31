@@ -766,10 +766,36 @@ def _selector_unidad(serie: dict, unidad: str | None = None):
 
 
 def panel_graphs(resultados: dict, serie: dict | None = None,
-                 fallos: list | None = None, unidad: str | None = None):
+                 fallos: list | None = None, unidad: str | None = None,
+                 serie_sandbox: dict | None = None,
+                 fallos_sandbox: list | None = None):
     if alt is None:
         st.error("Falta `altair`. Instalalo con `pip install altair`.")
         return
+
+    # --- Fuente de la serie: oficial o escenario del sandbox ---------------
+    # El escenario llega con la MISMA forma que la serie oficial, asi que
+    # elegido uno u otro, todas las laminas, el PDF y las exportaciones
+    # funcionan igual sin tocar nada. Se elige la fuente, no se mezclan.
+    hay_oficial = isinstance(serie, dict) and len(serie.get("plantas", [])) > 0
+    hay_sandbox = (isinstance(serie_sandbox, dict)
+                   and len(serie_sandbox.get("plantas", [])) > 0)
+
+    if hay_sandbox:
+        opciones = (["Corrida oficial", "Escenario sandbox"] if hay_oficial
+                    else ["Escenario sandbox"])
+        fuente = st.radio(
+            "Fuente de la serie", opciones, horizontal=True,
+            key="graphs_fuente",
+            help="El escenario es el que armaste en **Plantas (sandbox)** y "
+                 "corriste con «Calcular serie del escenario». La oficial es "
+                 "la de «Calcular serie» de la sidebar.")
+        if fuente == "Escenario sandbox":
+            serie, fallos = serie_sandbox, fallos_sandbox
+            st.caption(
+                "📊 Mostrando el **escenario del sandbox** (plantas agregadas "
+                "e intervenciones de ductos incluidas). Cambiá arriba para "
+                "volver a la corrida oficial.")
 
     if fallos:
         with st.expander(f"⚠️ {len(fallos)} período(s) fallaron al calcular la serie"):

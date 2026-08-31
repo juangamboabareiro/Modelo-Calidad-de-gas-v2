@@ -44,6 +44,8 @@ CLAVES_DATOS = (
     "sandbox_resultado",            # tab_plantas
     "sandbox_informe_ductos",       # tab_plantas
     "sandbox_red_gasoductos",       # tab_plantas -> mapa
+    "serie_sandbox",                # tab_plantas -> Graphs (serie del escenario)
+    "serie_sandbox_fallos",
     "plantas_flash",                # mensajes pendientes
     "gasoductos_flash",
 )
@@ -66,6 +68,10 @@ PREFIJOS_WIDGETS = (
     "btn_bajar_sim",
     # gasoductos_editor
     "gd_",
+    # asistente_escenario: transcript, borrador y widgets del bot guiado
+    "bot_",
+    # tab_plantas: el boton de la serie del escenario
+    "btn_serie_sandbox",
 )
 
 CLAVE_CONFIRMAR = "sandbox_confirmar_reset"
