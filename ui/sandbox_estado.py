@@ -66,9 +66,6 @@ PREFIJOS_WIDGETS = (
     "btn_bajar_sim",
     # gasoductos_editor
     "gd_",
-    # plantas_canvas: TODO el estado del drag & connect arranca con este
-    # prefijo a proposito (posiciones, grafo, firma, seleccion y el widget).
-    "canvas_",
 )
 
 CLAVE_CONFIRMAR = "sandbox_confirmar_reset"

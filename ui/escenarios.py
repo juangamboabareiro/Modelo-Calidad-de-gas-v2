@@ -12,9 +12,6 @@ DOS FORMATOS, UNO SOLO VIGENTE
     lista   ->  formato viejo: solo plantas. Se sigue leyendo para no romper los
                 escenarios ya guardados.
     dict    ->  formato actual: {"plantas": [...], "gasoductos": [...]}
-                y opcionalmente {"canvas": {nodo: [x, y]}} con el layout del
-                editor visual. Es cosmetico y opcional: un escenario sin esa
-                clave se abre igual y el canvas se acomoda solo.
 
 `aplicar` acepta los dos y `serializar` escribe siempre el nuevo.
 
@@ -37,47 +34,15 @@ import json
 
 CLAVE_PLANTAS = "plantas"
 CLAVE_GASODUCTOS = "gasoductos"
-CLAVE_CANVAS = "canvas"
 
 
-def serializar(registro, intervenciones, posiciones=None) -> str:
-    """Escenario completo a JSON.
-
-    `posiciones` es el layout del canvas ({nodo: (x, y)}, ver
-    `ui.plantas_canvas.obtener_posiciones`). Solo se escribe si hay algo: un
-    escenario armado sin tocar el canvas queda igual que antes.
-    """
+def serializar(registro, intervenciones) -> str:
+    """Escenario completo a JSON."""
     datos = {
         CLAVE_PLANTAS: [p.a_dict() for p in (registro or {}).values()],
         CLAVE_GASODUCTOS: [i.a_dict() for i in (intervenciones or [])],
     }
-    if posiciones:
-        datos[CLAVE_CANVAS] = {
-            str(nodo): [float(xy[0]), float(xy[1])]
-            for nodo, xy in posiciones.items()
-            if isinstance(xy, (tuple, list)) and len(xy) == 2
-        }
     return json.dumps(datos, indent=2, ensure_ascii=False)
-
-
-def posiciones_de(datos) -> dict:
-    """Las posiciones del canvas de un escenario, si las trae. Tolerante:
-    formato viejo (lista), clave ausente o valores rotos devuelven {} en vez
-    de romper la carga — el layout es cosmetico, las plantas son lo que vale."""
-    if not isinstance(datos, dict):
-        return {}
-    crudo = datos.get(CLAVE_CANVAS)
-    if not isinstance(crudo, dict):
-        return {}
-
-    posiciones = {}
-    for nodo, xy in crudo.items():
-        try:
-            x, y = float(xy[0]), float(xy[1])
-        except (TypeError, ValueError, IndexError, KeyError):
-            continue
-        posiciones[str(nodo)] = (x, y)
-    return posiciones
 
 
 def partir(datos) -> tuple[list, list]:
