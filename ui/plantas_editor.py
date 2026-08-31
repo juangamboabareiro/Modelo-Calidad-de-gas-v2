@@ -44,7 +44,10 @@ from pipeline.plantas.registro import (
     INFINITO,
 )
 from io_.cromatografias_planta import cargar_cromas_extra, resumen as resumen_cromas
-from ui.correccion_editor import bloque_correccion
+# El canvas drag & connect. Import siempre seguro (mismo criterio que
+# `ui.gasoductos_editor`): si falta `streamlit-flow-component`, `panel_canvas`
+# explica qué falta y el editor sigue funcionando con el selectbox de siempre.
+from ui.plantas_canvas import panel_canvas, obtener_posiciones, cargar_posiciones
 
 
 CLAVE = "registro_plantas"
@@ -173,12 +176,50 @@ def panel_plantas(retenidos_rtp, compuestos, config, tbx_en_servicio: bool,
         st.info("No hay plantas configuradas.")
         return registro, ["Registro vacio."], []
 
-    seleccion = st.selectbox("Planta a editar", sorted(registro), key="planta_sel")
+    # --- Canvas drag & connect: otra capa de edición sobre el MISMO registro.
+    # Crea/borra conexiones, decide quién toma de su pool y selecciona la
+    # planta con un click; los números finos (proporción, tope, mismo pool)
+    # se siguen afinando en la tabla de abajo.
+    seleccion_canvas, avisos_canvas, cambio_topologia = panel_canvas(
+        registro, factor_mm)
+
+    if cambio_topologia:
+        # El canvas cambió conexiones o cabeceras. Hay que tirar los deltas
+        # viejos de los widgets que editan LO MISMO — la tabla de conexiones
+        # (`con_*`) y el checkbox de cabecera (`cab_*`) — ANTES de dibujarlos:
+        # `st.data_editor` superpone sus ediciones guardadas al DataFrame
+        # nuevo y `st.checkbox` con key devuelve el valor guardado ignorando
+        # `value=`, así que si sobreviven, en este mismo rerun le escriben
+        # encima al registro lo que el canvas acaba de cambiar y el usuario ve
+        # la arista "volverse". No se pierde nada: esos widgets se regeneran
+        # desde el registro, que ya tiene los valores del usuario.
+        for clave in list(st.session_state):
+            if isinstance(clave, str) and clave.startswith(("con_", "cab_")):
+                st.session_state.pop(clave, None)
+
+    for aviso in avisos_canvas:
+        st.caption(f"🖱️ {aviso}")
+
+    if not registro:
+        # El canvas puede haber borrado la última planta agregada.
+        st.info("No hay plantas configuradas.")
+        return registro, ["Registro vacio."], []
+
+    opciones = sorted(registro)
+    # El canvas pudo borrar la planta que estaba seleccionada.
+    if st.session_state.get("planta_sel") not in opciones:
+        st.session_state.pop("planta_sel", None)
+    # Un click NUEVO en el canvas manda sobre el selectbox.
+    if seleccion_canvas in registro:
+        st.session_state["planta_sel"] = seleccion_canvas
+
+    seleccion = st.selectbox(
+        "Planta a editar", opciones, key="planta_sel",
+        help="También podés clickear la planta directamente en el canvas.")
     planta = registro[seleccion]
 
     _bloque_general(planta, factor_mm)
     _bloque_retenidos(planta, compuestos)
-    _bloque_correccion(planta)
     _bloque_conexiones(planta, registro, factor_mm)
 
     errores, avisos = validar_registro(registro)
@@ -252,7 +293,8 @@ def panel_escenarios(registro):
     """
     import json as _json
 
-    from ui.escenarios import serializar, partir, resumen as resumen_escenario
+    from ui.escenarios import (
+        serializar, partir, posiciones_de, resumen as resumen_escenario)
     # Por la frontera unica: `ui.gasoductos_editor` no falla aunque el paquete
     # `pipeline.gasoductos` no este instalado.
     from ui.gasoductos_editor import obtener_intervenciones, Intervencion
@@ -290,6 +332,12 @@ def panel_escenarios(registro):
         # limpiar el buffer del uploader: si no, `_aplicar_cromas` se las pisa
         # con una lista vacia en el proximo rerun.
         st.session_state[CLAVE_CROMAS] = {}
+
+        # Si el escenario trae posiciones del canvas, se mezclan sobre las
+        # actuales (merge, igual que las plantas) y se fuerza el redibujado.
+        # Un escenario viejo sin posiciones no toca nada: el canvas detecta
+        # solo el cambio de registro por la firma.
+        cargar_posiciones(posiciones_de(datos))
 
         _flash("success",
                f"**{etiqueta}**: {resumen_escenario(plantas_json, ductos_json)}. "
@@ -335,9 +383,10 @@ def panel_escenarios(registro):
 
     col_f.download_button(
         "Descargar", **ancho(), key="btn_desc_reg",
-        data=serializar(registro, obtener_intervenciones()).encode("utf-8"),
+        data=serializar(registro, obtener_intervenciones(),
+                        posiciones=obtener_posiciones()).encode("utf-8"),
         file_name="escenario.json", mime="application/json",
-        help="Plantas y gasoductos juntos.")
+        help="Plantas y gasoductos juntos (y el layout del canvas).")
 
 
 def aplicar_escenario(registro: dict, datos: list) -> tuple[int, int]:
@@ -456,21 +505,6 @@ def _bloque_general(planta: PlantaConfig, factor_mm):
 
         planta.color = st.color_picker(
             "Color en el diagrama", value=planta.color, key=f"col_{planta.nombre}")
-
-
-def _bloque_correccion(planta: PlantaConfig):
-    """Correccion de ingreso por llenar evacuacion, por planta.
-
-    Delega en `ui.correccion_editor.bloque_correccion` (el mismo bloque que la
-    sidebar). Se le pasa `_rerun` para que el boton "Interpretar" respete el
-    scope del fragment y no redibuje los otros tabs. Las reglas quedan en la
-    planta, asi viajan con el escenario y llegan a `modelar_planta`.
-    """
-    planta.correccion = bloque_correccion(
-        planta.nombre, f"pl_{planta.nombre}",
-        reglas_iniciales=getattr(planta, "correccion", None),
-        rerun=_rerun,
-    )
 
 
 def _describir_preset(preset: str) -> str:
