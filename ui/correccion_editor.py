@@ -1,26 +1,24 @@
 # -*- coding: utf-8 -*-
 """
-Editor amigable de la correccion de ingreso por llenar evacuacion.
-==================================================================
+Editor de la correccion de ingreso por llenar evacuacion.
+=========================================================
 
 Destino: ui/correccion_editor.py
 
-Un solo bloque, `bloque_correccion`, que se reusa en:
+Un solo bloque, `bloque_correccion`, que se reusa en la sidebar de app.py
+(una vez por planta) y en el editor de plantas del sandbox.
 
-  - la sidebar de app.py (una vez por planta: TTY-TBX, TTY-DP, MEGA), y
-  - el editor de plantas del sandbox (ui/plantas_editor.py).
+Tres maneras de fijar el LGN de un corte, elegidas por fila en la tabla:
 
-El flujo para el usuario:
+  1. POR PORCENTAJE — se retiene el X% del corte, pisando el RTP.
+     0% = pasa todo sin tratarse.
+  2. POR NUMERO — se retienen X tn/d fijas de ese corte (o todo lo que
+     produzca, si X supera lo disponible).
+  3. LLENAR EL TOPE EN ORDEN — los cortes marcados compiten por un tope
+     compartido de tn/d y lo llenan segun su orden (1 primero); lo que no
+     entra en el tope no se retiene.
 
-  1. Escribe el mecanismo con sus palabras ("la gasolina pasa 100%, no se
-     trata etano, hasta 200 tn/d primero butanos y despues propano").
-  2. Aprieta "Interpretar": el parser llena la tabla estructurada.
-  3. Lee la traduccion de vuelta ("Con esta correccion: ...") y, si algo no
-     coincide con lo que quiso decir, lo corrige a mano en la tabla.
-
-IMPORTANTE: NO meter este bloque adentro de un `st.form`. El boton
-"Interpretar" necesita su propio rerun y adentro de un form los botones
-comunes no existen (solo `form_submit_button`). En app.py va ANTES del form.
+Un corte sin regla conserva su retencion original del RTP.
 
 Las reglas viven en `st.session_state["corr_<key>"]` (dict JSON-friendly,
 ver pipeline/plantas/correccion.py) y la funcion ademas las devuelve.
@@ -33,25 +31,32 @@ import streamlit as st
 
 from pipeline.plantas.correccion import (
     CORTES, MODO_LIBRE, MODO_PASA, REGLAS_LEGACY,
-    copiar_reglas, describir_reglas, parsear_reglas, reglas_vacias,
+    copiar_reglas, describir_reglas, es_porcentaje, es_tn, reglas_vacias,
 )
 
 # Etiquetas visibles <-> modos internos.
 _ETIQUETAS = {
     MODO_LIBRE: "Sin correccion",
-    MODO_PASA: "Pasa 100%",
-    "tope": "Entra al tope",
+    "porcentaje": "Por porcentaje [%]",
+    "tn": "Por numero [tn/d]",
+    "tope": "Llenar el tope (en orden)",
 }
 _MODOS = {v: k for k, v in _ETIQUETAS.items()}
 
-_PLACEHOLDER = (
-    "Ej: la gasolina pasa 100%, no se trata etano, y hasta 200 tn/d se "
-    "llena primero con butanos y despues con propano"
+_EXPLICATIVO = (
+    "Tres maneras de fijar el LGN de un corte — un corte sin regla conserva "
+    "su retención del RTP:\n"
+    "- **Por porcentaje**: se retiene el X% del corte (0% = pasa todo sin "
+    "tratarse).\n"
+    "- **Por número**: se retienen X tn/d fijas de ese corte.\n"
+    "- **Llenar el tope (en orden)**: los cortes marcados comparten un tope "
+    "de tn/d y lo llenan según su orden (1 primero); lo que no entra, no se "
+    "retiene."
 )
 
-# Widgets cuyo estado hay que resetear cuando el parser (o el boton de reglas
-# clasicas) pisa las reglas: si no, Streamlit conserva el valor viejo del
-# widget y el usuario no ve lo que se acaba de interpretar.
+# Widgets cuyo estado hay que resetear cuando un boton pisa las reglas: si
+# no, Streamlit conserva el valor viejo del widget y el usuario no ve el
+# cambio que acaba de pedir.
 _SUFIJOS_WIDGETS = ("_on", "_ed", "_tope", "_solo")
 
 
@@ -69,18 +74,60 @@ def obtener_reglas(key: str) -> dict:
     return copiar_reglas(st.session_state.get(_clave(key)))
 
 
+def _fila_de(corte: str, modo) -> dict:
+    """Modo interno -> fila de la tabla (etiqueta + valor)."""
+    if isinstance(modo, int):
+        return {"Corte": corte, "Modo": _ETIQUETAS["tope"], "Valor": float(modo)}
+    if es_porcentaje(modo):
+        return {"Corte": corte, "Modo": _ETIQUETAS["porcentaje"],
+                "Valor": float(modo["porcentaje"])}
+    if es_tn(modo):
+        return {"Corte": corte, "Modo": _ETIQUETAS["tn"], "Valor": float(modo["tn"])}
+    if modo == MODO_PASA:
+        # "pasa" es el caso limite de porcentaje 0: se muestra asi de simple.
+        return {"Corte": corte, "Modo": _ETIQUETAS["porcentaje"], "Valor": 0.0}
+    return {"Corte": corte, "Modo": _ETIQUETAS[MODO_LIBRE], "Valor": None}
+
+
+def _modo_de(fila, prioridad_relleno: list) -> object | None:
+    """Fila de la tabla -> modo interno. None = sin correccion / incompleta."""
+    modo = _MODOS.get(fila["Modo"], MODO_LIBRE)
+    valor = fila["Valor"]
+
+    if modo == MODO_LIBRE:
+        return None
+
+    if modo == "tope":
+        if pd.isna(valor):
+            prioridad_relleno[0] += 1     # sin orden cargado -> al final
+            return prioridad_relleno[0]
+        return max(1, int(valor))
+
+    if pd.isna(valor):
+        return None                        # % o tn/d sin numero: incompleta
+
+    if modo == "porcentaje":
+        pct = max(0.0, min(100.0, float(valor)))
+        return MODO_PASA if pct <= 0 else {"porcentaje": pct}
+
+    # modo == "tn"
+    tn = float(valor)
+    return MODO_PASA if tn <= 0 else {"tn": tn}
+
+
 def bloque_correccion(nombre_planta: str, key: str,
                       reglas_iniciales: dict | None = None,
                       expandido: bool = False, rerun=None) -> dict:
     """Dibuja el editor y devuelve las reglas vigentes (dict).
 
     rerun : callable | None
-        Como rerunear despues de "Interpretar" / "Reglas clasicas". None =
+        Como rerunear despues de un boton que pisa las reglas. None =
         `st.rerun()` a app entera. El sandbox pasa su `_rerun`, que respeta
         el scope del fragment y no redibuja los otros tabs.
     """
     if rerun is None:
         rerun = st.rerun
+
     clave = _clave(key)
 
     if clave not in st.session_state:
@@ -91,57 +138,16 @@ def bloque_correccion(nombre_planta: str, key: str,
             f"Correccion de ingreso por llenar evacuacion — {nombre_planta}",
             expanded=expandido):
 
-        st.caption(
-            "Cuando el LGN del pool no entra en la evacuacion, en vez de "
-            "rechazar gas la planta **baja la recuperacion** segun estas "
-            "reglas: que corte pasa de largo, y con que orden se llena el "
-            "tope de tn/d.")
-
-        # ---------- 1) texto libre + interpretar --------------------------
-        texto = st.text_area(
-            "Explica el mecanismo con tus palabras",
-            key=f"{clave}_txt", placeholder=_PLACEHOLDER, height=80)
-
-        col_a, col_b = st.columns(2)
-
-        if col_a.button("✨ Interpretar", key=f"{clave}_btn",
-                        use_container_width=True):
-            nuevas, avisos = parsear_reglas(texto)
-            st.session_state[clave] = nuevas
-            st.session_state[f"{clave}_avisos"] = avisos
-            _resetear_widgets(clave)
-            rerun()
-
-        if col_b.button("Reglas clasicas", key=f"{clave}_leg",
-                        use_container_width=True,
-                        help="Las que estaban hardcodeadas: gasolina pasa "
-                             "100%, etano no se trata, el tope se llena "
-                             "primero con butanos y despues con propano."):
-            legacy = copiar_reglas(REGLAS_LEGACY)
-            legacy["aplicar"] = True
-            st.session_state[clave] = legacy
-            _resetear_widgets(clave)
-            rerun()
-
-        for aviso in st.session_state.pop(f"{clave}_avisos", []):
-            st.warning(aviso)
+        st.markdown(_EXPLICATIVO)
 
         reglas = st.session_state[clave]
 
-        # ---------- 2) editor estructurado (la verdad esta aca) -----------
         reglas["aplicar"] = st.checkbox(
             "Aplicar esta correccion", key=f"{clave}_on",
             value=bool(reglas.get("aplicar")))
 
-        filas = []
-        for corte in CORTES:
-            modo = reglas.get("cortes", {}).get(corte, MODO_LIBRE)
-            es_tope = isinstance(modo, int)
-            filas.append({
-                "Corte": corte,
-                "Modo": _ETIQUETAS["tope"] if es_tope else _ETIQUETAS[modo],
-                "Prioridad": int(modo) if es_tope else None,
-            })
+        filas = [_fila_de(c, reglas.get("cortes", {}).get(c, MODO_LIBRE))
+                 for c in CORTES]
 
         editado = st.data_editor(
             pd.DataFrame(filas), hide_index=True, use_container_width=True,
@@ -149,43 +155,57 @@ def bloque_correccion(nombre_planta: str, key: str,
             column_config={
                 "Corte": st.column_config.TextColumn(disabled=True),
                 "Modo": st.column_config.SelectboxColumn(
-                    options=list(_MODOS), required=True,
-                    help="Pasa 100% = retencion en cero. Entra al tope = "
-                         "compite por los tn/d del tope segun su prioridad."),
-                "Prioridad": st.column_config.NumberColumn(
-                    min_value=1, step=1,
-                    help="Solo cuenta para los cortes que entran al tope: "
-                         "1 llena primero."),
+                    options=list(_MODOS), required=True),
+                "Valor": st.column_config.NumberColumn(
+                    min_value=0.0, step=1.0,
+                    help="Segun el modo: el % retenido (0 = pasa todo), las "
+                         "tn/d fijas, o el orden con el que llena el tope "
+                         "(1 primero)."),
             })
 
-        cortes = {}
-        prioridad_relleno = 90   # sin prioridad cargada -> al final, estable
+        prioridad_relleno = [90]   # lista para mutar desde _modo_de
+        cortes, incompletos = {}, []
         for _, fila in editado.iterrows():
-            modo = _MODOS.get(fila["Modo"], MODO_LIBRE)
-            if modo == "tope":
-                prio = fila["Prioridad"]
-                if pd.isna(prio):
-                    prioridad_relleno += 1
-                    prio = prioridad_relleno
-                cortes[fila["Corte"]] = int(prio)
-            elif modo == MODO_PASA:
-                cortes[fila["Corte"]] = MODO_PASA
+            modo = _modo_de(fila, prioridad_relleno)
+            if modo is not None:
+                cortes[fila["Corte"]] = modo
+            elif _MODOS.get(fila["Modo"], MODO_LIBRE) != MODO_LIBRE:
+                incompletos.append(fila["Corte"])
         reglas["cortes"] = cortes
 
-        col_c, col_d = st.columns(2)
-        reglas["tope"] = col_c.number_input(
+        if incompletos:
+            st.caption("✏️ Falta el **Valor** de: " + ", ".join(incompletos)
+                       + " — hasta completarlo quedan sin correccion.")
+
+        hay_tope = any(isinstance(m, int) for m in cortes.values())
+
+        col_a, col_b = st.columns(2)
+        reglas["tope"] = col_a.number_input(
             "Tope [tn/d]", key=f"{clave}_tope",
             min_value=0.0, step=50.0, value=float(reglas.get("tope") or 0.0),
-            help="0 = usar la capacidad de evacuacion de la planta "
-                 "(con las ampliaciones vigentes al periodo).")
-        reglas["solo_si_excede"] = col_d.checkbox(
+            disabled=not hay_tope,
+            help="Solo cuenta para «Llenar el tope (en orden)»: los tn/d que "
+                 "se reparten entre esos cortes. 0 = usar la capacidad de "
+                 "evacuacion de la planta (con ampliaciones incluidas).")
+        reglas["solo_si_excede"] = col_b.checkbox(
             "Solo si el LGN excede el tope", key=f"{clave}_solo",
             value=bool(reglas.get("solo_si_excede", True)),
-            help="Destildado, la correccion se aplica siempre (por ejemplo "
-                 "para forzar que la gasolina pase 100% aunque sobre "
-                 "evacuacion).")
+            help="Destildado, la correccion se aplica siempre. Con reglas por "
+                 "porcentaje o por numero conviene destildarlo: describen "
+                 "como opera la planta, no un mecanismo de desborde.")
 
-        # ---------- 3) el espejo: que entendio la app ----------------------
+        if col_b.button("Reglas clasicas", key=f"{clave}_leg",
+                        use_container_width=True,
+                        help="Las de siempre: gasolina y etano pasan (0%), y "
+                             "el tope se llena primero con butanos y despues "
+                             "con propano."):
+            legacy = copiar_reglas(REGLAS_LEGACY)
+            legacy["aplicar"] = True
+            st.session_state[clave] = legacy
+            _resetear_widgets(clave)
+            rerun()
+
+        # El espejo: que va a hacer el modelo con lo cargado.
         st.info("📖 " + describir_reglas(reglas))
 
     st.session_state[clave] = reglas
