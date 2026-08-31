@@ -108,9 +108,11 @@ def panel_canvas(registro: dict, factor_mm: float = 1000.0,
     """
     if not DISPONIBLE:
         st.info(
-            "El editor visual necesita `streamlit-flow-component` "
-            "(agregalo a requirements.txt: `streamlit-flow-component`). "
-            f"Detalle: {MOTIVO}\n\n"
+            "El editor visual necesita `streamlit-flow-component` **1.5.0 o "
+            "posterior** (en requirements.txt: "
+            "`streamlit-flow-component==1.6.1`). Las versiones anteriores no "
+            "tienen `StreamlitFlowState`, que es lo que sincroniza el canvas "
+            f"con el registro. Detalle: {MOTIVO}\n\n"
             "Mientras tanto el editor de abajo funciona igual.")
         return None, [], False
 
@@ -303,6 +305,7 @@ def _construir_estado(registro, factor_mm) -> "StreamlitFlowState":
                 target=f"p::{nombre}",
                 label="toma del pool",
                 edge_type="smoothstep",
+                marker_end={"type": "arrow"},
                 style={"strokeDasharray": "6 4", "stroke": "#E59866"},
             ))
 
@@ -315,6 +318,7 @@ def _construir_estado(registro, factor_mm) -> "StreamlitFlowState":
                 label=_etiqueta_conexion(c, factor_mm),
                 animated=not c.comparte_pool,
                 edge_type="smoothstep",
+                marker_end={"type": "arrowclosed"},
             ))
 
         # planta -> bypass: informativa, sólo donde el bypass es estructural.
@@ -327,6 +331,7 @@ def _construir_estado(registro, factor_mm) -> "StreamlitFlowState":
                 target="bypass",
                 label="bypass",
                 edge_type="smoothstep",
+                marker_end={"type": "arrow"},
                 style={"strokeDasharray": "3 5", "stroke": "#EC7063"},
             ))
 
