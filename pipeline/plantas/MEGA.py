@@ -14,10 +14,15 @@ from pipeline.plantas.flujo_plantas import (
     repartir_flujo_planta,
     calcular_DERIVACION,
 )
+from pipeline.plantas.correccion import (
+    aplicar_a_planta,
+    mapa_cortes,
+    describir_reglas,
+)
 
 
 
-def modelar_MEGA(matriz_inyecciones, calcular_retenidos, tabla_total_flujos_directos, propiedades, COMPUESTOS, retenidos_MEGA, CAPACIDAD_EVACUACION_MEGA, CAPACIDAD_MEGA=None, derivaciones=None, tabla_total_yacimientos=None, tabla_total_hubs=None, mapa_area_hub=None):
+def modelar_MEGA(matriz_inyecciones, calcular_retenidos, tabla_total_flujos_directos, propiedades, COMPUESTOS, retenidos_MEGA, CAPACIDAD_EVACUACION_MEGA, CAPACIDAD_MEGA=None, derivaciones=None, tabla_total_yacimientos=None, tabla_total_hubs=None, mapa_area_hub=None, correccion=None):
     """Modela MEGA: ultimo eslabon de la cascada.
 
     MEGA tiene pool propio y ademas recibe la derivacion de TTY-DP, que viene
@@ -28,21 +33,43 @@ def modelar_MEGA(matriz_inyecciones, calcular_retenidos, tabla_total_flujos_dire
 
     No deriva hacia ningun lado (MAX_DERIVACION fijo en 0), entonces todo lo que
     no pueda tratar es BYPASS.
+
+    correccion : dict | None
+        Reglas de la correccion de ingreso por llenar evacuacion (ver
+        pipeline/plantas/correccion.py). Si aplican, se bajan los coeficientes
+        de recuperacion y se RE-MODELA el pool: MEGA acepta mas gas a costa de
+        recuperar menos liquido. None o apagada = camino identico al de siempre.
     """
 
-    tabla_pool, gas_rico_IN, gas_residual_OUT, retenidos_pool, retenidos_vol_pool = io_plantas(
-        matriz_inyecciones=matriz_inyecciones,
-        calcular_retenidos=calcular_retenidos,
-        tabla_total_flujos_directos=tabla_total_flujos_directos,
-        tabla_total_yacimientos=tabla_total_yacimientos,   # nuevo
-        tabla_total_hubs=tabla_total_hubs,                 # gas via HUB
-        mapa_area_hub=mapa_area_hub,
-        propiedades=propiedades,
-        compuestos=COMPUESTOS,
+    def _modelar_pool(coefs):
+        return io_plantas(
+            matriz_inyecciones=matriz_inyecciones,
+            calcular_retenidos=calcular_retenidos,
+            tabla_total_flujos_directos=tabla_total_flujos_directos,
+            tabla_total_yacimientos=tabla_total_yacimientos,   # nuevo
+            tabla_total_hubs=tabla_total_hubs,                 # gas via HUB
+            mapa_area_hub=mapa_area_hub,
+            propiedades=propiedades,
+            compuestos=COMPUESTOS,
+            retenidos_planta=coefs,
+            nombre_planta='MEGA',
+            derivaciones=derivaciones,
+        )
+
+    tabla_pool, gas_rico_IN, gas_residual_OUT, retenidos_pool, retenidos_vol_pool = (
+        _modelar_pool(retenidos_MEGA))
+
+    # Correccion de ingreso por llenar evacuacion (reglas del usuario).
+    coefs_corregidos = aplicar_a_planta(
+        reglas=correccion,
         retenidos_planta=retenidos_MEGA,
-        nombre_planta='MEGA',
-        derivaciones=derivaciones,
+        retenidos_vol_pool=retenidos_vol_pool,
+        capacidad_evacuacion=CAPACIDAD_EVACUACION_MEGA,
+        cortes_compuestos=mapa_cortes(ETANO, PROPANO, BUTANOS, GASOLINA),
     )
+    if coefs_corregidos is not None:
+        tabla_pool, gas_rico_IN, gas_residual_OUT, retenidos_pool, retenidos_vol_pool = (
+            _modelar_pool(coefs_corregidos))
 
     vol_pool = float(tabla_pool['Volumen_inyectado'].values.sum())
 
@@ -65,6 +92,9 @@ def modelar_MEGA(matriz_inyecciones, calcular_retenidos, tabla_total_flujos_dire
     flujos['lgn_unitario'] = lgn_unitario
     flujos['lgn_asignado'] = lgn_unitario * flujos['vol_asignado']
     flujos['activa'] = True
+    flujos['correccion_aplicada'] = coefs_corregidos is not None
+    if coefs_corregidos is not None:
+        flujos['correccion_descripcion'] = describir_reglas(correccion)
 
     escala = (flujos['vol_asignado'] / vol_pool) if vol_pool else 0.0
 

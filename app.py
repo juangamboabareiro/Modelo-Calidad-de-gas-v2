@@ -98,10 +98,12 @@ from ui.diagnosticos import capturar, mostrar as mostrar_diagnostico
 
 from ui.tab_plantas import panel_tab_plantas
 from ui.tab_graphs import panel_graphs
+from ui.correccion_editor import bloque_correccion
 
 
 
-st.set_page_config(page_title="Balance de Gas", page_icon="🛢️", layout="wide")
+st.set_page_config(page_title="Balance de Gas", page_icon="🛢️",  # emoji-ok: favicon
+                   layout="wide")
 
 
 # Unidades: cuántas unidades de Volumen_inyectado hay en 1 MMm3/d.
@@ -166,7 +168,7 @@ def _boton_descarga(df: pd.DataFrame, nombre: str, key: str):
     csv_buffer = io.StringIO()
     df.to_csv(csv_buffer, index=False)
     st.download_button(
-        f"⬇️ Descargar {nombre}.csv",
+        f"Descargar {nombre}.csv",
         data=csv_buffer.getvalue(),
         file_name=f"{nombre}.csv",
         mime="text/csv",
@@ -221,8 +223,14 @@ def _kpi_planta(nombre_planta: str, datos: dict):
     cap_evac = datos["capacidad_evacuacion"]
 
     if not flujos.get("activa", True):
-        st.info(f"⏸️ **{nombre_planta}** fuera de servicio en este período "
+        st.info(f"**{nombre_planta}** fuera de servicio en este período "
                 f"(anterior a la fecha de PM): el gas pasa directo al siguiente eslabón.")
+
+    if flujos.get("correccion_aplicada"):
+        st.info(
+            f"🔧 **{nombre_planta}**: se aplicó la corrección de ingreso por "
+            "llenar evacuación (baja la recuperación para aceptar más gas). "
+            + flujos.get("correccion_descripcion", ""))
 
     c1, c2, c3 = st.columns(3)
     c1.metric("LGN producido", _fmt(flujos["lgn_asignado"], 1, " tn/d"))
@@ -408,7 +416,7 @@ def _actualizar_config_y_recargar(path, params):
 # Encabezado
 # ===========================================================================
 
-st.title("🛢️ Balance de Gas — Panel de resultados")
+st.title("Balance de Gas — Panel de resultados")
 st.caption("Cascada TTY-TBX → TTY-DP → MEGA, limitada por evacuación de LGN.")
 
 with st.expander("ℹ️ Cómo leer este panel"):
@@ -445,6 +453,24 @@ if uploaded is not None:
 else:
     input_path = PATH_INPUTS_DEFAULT
 st.sidebar.caption(f"Archivo en uso: `{Path(input_path).name}`")
+
+# ---------------------------------------------------------------------------
+# Correccion de ingreso por llenar evacuacion, POR PLANTA.
+#
+# Va AFUERA del form por el mismo motivo que el file_uploader: el boton
+# "Interpretar" (que traduce la explicacion en castellano a reglas) necesita su
+# propio rerun, y adentro de un form los botones comunes no existen. Las reglas
+# quedan en session_state, asi que el submit del form las ve igual.
+# ---------------------------------------------------------------------------
+with st.sidebar:
+    st.header("1b. Corrección por llenar evacuación")
+    st.caption(
+        "Opcional, por planta: si el LGN del pool no entra en la evacuación, "
+        "en vez de rechazar gas la planta baja la recuperación según reglas "
+        "que podés escribir con tus palabras.")
+    corr_tty_tbx = bloque_correccion("TTY-TBX", "tbx")
+    corr_tty_dp = bloque_correccion("TTY-DP", "dp")
+    corr_mega = bloque_correccion("MEGA", "mega")
 
 # Las secciones 2 a 7 van dentro de un FORM. Adentro de un form los widgets no
 # disparan rerun: se comitean todos juntos cuando apretas un submit. Sin esto,
@@ -625,7 +651,7 @@ with st.sidebar.form("parametros", **_form_kwargs):
     guardar_csvs = st.checkbox("Guardar CSVs en disco al ejecutar", value=False)
 
     run = st.form_submit_button(
-        "▶️ Ejecutar pipeline", type="primary", use_container_width=True)
+        "Ejecutar pipeline", type="primary", use_container_width=True)
 
     st.header("9. Serie temporal")
     st.caption(
@@ -659,7 +685,7 @@ with st.sidebar.form("parametros", **_form_kwargs):
     # quedaria con el estado del submit anterior. El rango vacio se valida
     # abajo, en el `if run_serie`.
     run_serie = st.form_submit_button(
-        "📈 Calcular serie", use_container_width=True)
+        "Calcular serie", use_container_width=True)
 
 PARAMS = {
     "PERIODO_CONSIDERADO": periodo_ts,
@@ -677,6 +703,14 @@ PARAMS = {
     # ejecutar_pipeline, asi la serie temporal las prende mes a mes.
     "AMPLIACIONES_TTY": ampliaciones_tty,
     "AMPLIACIONES_MEGA": ampliaciones_mega,
+    # Reglas de la correccion de ingreso por llenar evacuacion, por planta
+    # (dicts de ui.correccion_editor; ver pipeline/plantas/correccion.py).
+    # Con tope=0 el fallback a la capacidad de evacuacion se resuelve ADENTRO
+    # del modelo, asi que en la serie temporal cada mes usa la evacuacion
+    # efectiva de ese mes, ampliaciones incluidas.
+    "CORRECCION_TTY_TBX": corr_tty_tbx,
+    "CORRECCION_TTY_DP": corr_tty_dp,
+    "CORRECCION_MEGA": corr_mega,
 }
 
 
@@ -1141,6 +1175,7 @@ def ejecutar_pipeline(path, params, guardar_csvs, silencioso=False) -> dict:
             MAX_DERIVACION_PLANTA_A_PLANTA=(
                 params["MAX_DERIVACION_TTY_TBX_A_TTY_DP"] if tbx_activa else float("inf")),
             activa=tbx_activa,
+            correccion=params.get("CORRECCION_TTY_TBX"),
         )
 
         # 2) TTY-DP: recibe el sobrante de TBX (o el pool completo pre-PM).
@@ -1151,6 +1186,7 @@ def ejecutar_pipeline(path, params, guardar_csvs, silencioso=False) -> dict:
             CAPACIDAD_TTY=params["CAPACIDAD_TTY_DP"],
             vol_disponible=TTY_TBX["flujos"]["vol_derivado"],
             MAX_DERIVACION_PLANTA_A_PLANTA=params["MAX_DERIVACION_TTY_DP_A_MEGA"],
+            correccion=params.get("CORRECCION_TTY_DP"),
         )
 
         # 3) DP -> MEGA: acá sí es derivación con mezcla (otra composición).
@@ -1166,6 +1202,7 @@ def ejecutar_pipeline(path, params, guardar_csvs, silencioso=False) -> dict:
             CAPACIDAD_EVACUACION_MEGA=params["CAPACIDAD_EVACUACION_MEGA"],
             CAPACIDAD_MEGA=params["CAPACIDAD_MEGA"],
             derivaciones=[derivacion_DP_a_MEGA],
+            correccion=params.get("CORRECCION_MEGA"),
         )
         status.update(label="Cascada resuelta ✅", state="complete")
 
@@ -1719,7 +1756,7 @@ def construir_vista_9300(resultados: dict):
 resultados = st.session_state.get("resultados")
 
 if resultados is None:
-    st.info("Elegí los parámetros en la barra lateral y apretá **▶️ Ejecutar pipeline**.")
+    st.info("Elegí los parámetros en la barra lateral y apretá **Ejecutar pipeline**.")
     st.stop()
 
 # ---------------------------------------------------------------------------
@@ -1727,7 +1764,7 @@ if resultados is None:
 # sin recorrer el pipeline, porque es pura conversión de presentación).
 # ---------------------------------------------------------------------------
 unidad_volumen = st.sidebar.radio(
-    "🧭 Unidad de volúmenes", [UNIDAD_9300, UNIDAD_STD], index=0,
+    "Unidad de volúmenes", [UNIDAD_9300, UNIDAD_STD], index=0,
     key="unidad_volumen_global",
     help="Aplica a KPIs, tabs de plantas, tablas, mapa y Graphs. STD: metros "
          "cúbicos físicos. 9.300: equivalentes en energía (V₉₃₀₀ = V_STD × "
@@ -1748,7 +1785,7 @@ tbx_en_servicio_res = resultados["tbx_en_servicio"]
 
 (tab_resumen, tab_graphs, tab_cascada, tab_tablas, tab_red,
  tab_tbx, tab_dp, tab_mega, tab_sandbox) = st.tabs(
-    ["📊 Resumen", "📈 Graphs", "🔗 Cascada", "📋 Tablas totales", "🗺️ Mapa de la red",
+    ["Resumen", "Graphs", "Cascada", "Tablas totales", "Mapa de la red",
      "TTY - TBX", "TTY - Dew Point", "MEGA", "Plantas (sandbox)"]
 )
 
@@ -1758,8 +1795,8 @@ with tab_resumen:
     # y los KPI). El contador en el título deja ver si hay algo sin abrirlo.
     _obs = st.session_state.get("diagnostico", [])
     with st.expander(
-        f"🔍 Calidad de los datos de entrada — {len(_obs)} observación(es)"
-        if _obs else "🔍 Calidad de los datos de entrada — sin observaciones",
+        f"Calidad de los datos de entrada — {len(_obs)} observación(es)"
+        if _obs else "Calidad de los datos de entrada — sin observaciones",
         expanded=False,
     ):
         mostrar_diagnostico(_obs)

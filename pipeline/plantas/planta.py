@@ -102,21 +102,45 @@ def modelar_planta(planta, comunes, vol_disponible=None, derivaciones=None):
     # mismo parametro, asi que `planta_template` no se toca.
     entradas = list(derivaciones or []) + list(planta.cromas_extra or [])
 
-    tabla_pool, gas_rico_IN, gas_residual_OUT, retenidos_pool, retenidos_vol_pool = io_plantas(
-        matriz_inyecciones=comunes.get("matriz_inyecciones"),
-        calcular_retenidos=comunes["calcular_retenidos"],
-        tabla_total_flujos_directos=comunes["tabla_total_flujos_directos"],
-        tabla_total_yacimientos=comunes.get("tabla_total_yacimientos"),
-        # `.get` y no acceso directo: los tests del tab arman `comunes` a mano
-        # sin estas claves y no tienen por que conocerlas.
-        tabla_total_hubs=comunes.get("tabla_total_hubs"),
-        mapa_area_hub=comunes.get("mapa_area_hub"),
-        propiedades=comunes["propiedades"],
-        compuestos=compuestos,
-        retenidos_planta=planta.retenidos,
-        nombre_planta=planta.nombre_pool or planta.nombre,
-        derivaciones=entradas or None,
-    )
+    def _modelar_pool(coefs):
+        return io_plantas(
+            matriz_inyecciones=comunes.get("matriz_inyecciones"),
+            calcular_retenidos=comunes["calcular_retenidos"],
+            tabla_total_flujos_directos=comunes["tabla_total_flujos_directos"],
+            tabla_total_yacimientos=comunes.get("tabla_total_yacimientos"),
+            # `.get` y no acceso directo: los tests del tab arman `comunes` a
+            # mano sin estas claves y no tienen por que conocerlas.
+            tabla_total_hubs=comunes.get("tabla_total_hubs"),
+            mapa_area_hub=comunes.get("mapa_area_hub"),
+            propiedades=comunes["propiedades"],
+            compuestos=compuestos,
+            retenidos_planta=coefs,
+            nombre_planta=planta.nombre_pool or planta.nombre,
+            derivaciones=entradas or None,
+        )
+
+    tabla_pool, gas_rico_IN, gas_residual_OUT, retenidos_pool, retenidos_vol_pool = (
+        _modelar_pool(planta.retenidos))
+
+    # Correccion de ingreso por llenar evacuacion (reglas del usuario, dict en
+    # planta.correccion). Imports adentro de la funcion por el mismo motivo que
+    # `_dependencias`: sobrevivir a los reload de app.py. `getattr` y no acceso
+    # directo: escenarios y tests viejos arman PlantaConfig sin este campo.
+    coefs_corregidos = None
+    if planta.activa and getattr(planta, "correccion", None):
+        from pipeline.plantas.correccion import aplicar_a_planta, mapa_cortes
+        from domain.ctes_gas import ETANO, PROPANO, BUTANOS, GASOLINA
+
+        coefs_corregidos = aplicar_a_planta(
+            reglas=planta.correccion,
+            retenidos_planta=planta.retenidos,
+            retenidos_vol_pool=retenidos_vol_pool,
+            capacidad_evacuacion=planta.capacidad_evacuacion,
+            cortes_compuestos=mapa_cortes(ETANO, PROPANO, BUTANOS, GASOLINA),
+        )
+    if coefs_corregidos is not None:
+        tabla_pool, gas_rico_IN, gas_residual_OUT, retenidos_pool, retenidos_vol_pool = (
+            _modelar_pool(coefs_corregidos))
 
     vol_pool = float(tabla_pool["Volumen_inyectado"].values.sum())
 
@@ -166,6 +190,10 @@ def modelar_planta(planta, comunes, vol_disponible=None, derivaciones=None):
     flujos["lgn_unitario"] = lgn_unitario
     flujos["lgn_asignado"] = lgn_unitario * flujos["vol_asignado"]
     flujos["activa"] = planta.activa
+    flujos["correccion_aplicada"] = coefs_corregidos is not None
+    if coefs_corregidos is not None:
+        from pipeline.plantas.correccion import describir_reglas
+        flujos["correccion_descripcion"] = describir_reglas(planta.correccion)
 
     # Escalado pro-rata al volumen asignado. Volumen_relativo y la cromato no
     # cambian: es el mismo gas, solo una porcion.

@@ -11,6 +11,11 @@ from pipeline.plantas.flujo_plantas import (
     repartir_flujo_planta,
     calcular_DERIVACION,
 )
+from pipeline.plantas.correccion import (
+    aplicar_a_planta,
+    mapa_cortes,
+    describir_reglas,
+)
 
 
 
@@ -75,7 +80,8 @@ def modelar_TTY(matriz_inyecciones, calcular_retenidos, tabla_total_flujos_direc
                 vol_disponible=None, MAX_DERIVACION_PLANTA_A_PLANTA=0.0,
                 CAPACIDAD_TTY=None, derivaciones=None, activa=True,
                 tabla_total_yacimientos=None,
-                tabla_total_hubs=None, mapa_area_hub=None):
+                tabla_total_hubs=None, mapa_area_hub=None,
+                correccion=None):
     """Modela un tren TTY (Dew Point o TBX) como eslabon de la cascada.
 
     LOGICA
@@ -100,21 +106,49 @@ def modelar_TTY(matriz_inyecciones, calcular_retenidos, tabla_total_flujos_direc
     activa : bool
         False para un tren fuera de servicio (TTY-TBX antes de la fecha de PM):
         no toma nada y todo su gas disponible pasa como derivacion al siguiente.
+
+    correccion : dict | None
+        Reglas de la correccion de ingreso por llenar evacuacion (ver
+        pipeline/plantas/correccion.py). Si aplican, se bajan los coeficientes
+        de recuperacion segun las reglas y se RE-MODELA el pool: la planta
+        acepta mas gas a costa de recuperar menos liquido. None o apagada =
+        camino identico al de siempre.
     """
 
-    tabla_pool, gas_rico_IN, gas_residual_OUT, retenidos_pool, retenidos_vol_pool = io_plantas(
-        matriz_inyecciones=matriz_inyecciones,
-        calcular_retenidos=calcular_retenidos,
-        tabla_total_flujos_directos=tabla_total_flujos_directos,
-        tabla_total_yacimientos=tabla_total_yacimientos,   # nuevo
-        tabla_total_hubs=tabla_total_hubs,                 # gas via HUB
-        mapa_area_hub=mapa_area_hub,
-        propiedades=propiedades,
-        compuestos=COMPUESTOS,
-        retenidos_planta=retenidos_TTY,
-        nombre_planta='TTY',
-        derivaciones=derivaciones,
-    )
+    def _modelar_pool(coefs):
+        return io_plantas(
+            matriz_inyecciones=matriz_inyecciones,
+            calcular_retenidos=calcular_retenidos,
+            tabla_total_flujos_directos=tabla_total_flujos_directos,
+            tabla_total_yacimientos=tabla_total_yacimientos,   # nuevo
+            tabla_total_hubs=tabla_total_hubs,                 # gas via HUB
+            mapa_area_hub=mapa_area_hub,
+            propiedades=propiedades,
+            compuestos=COMPUESTOS,
+            retenidos_planta=coefs,
+            nombre_planta='TTY',
+            derivaciones=derivaciones,
+        )
+
+    tabla_pool, gas_rico_IN, gas_residual_OUT, retenidos_pool, retenidos_vol_pool = (
+        _modelar_pool(retenidos_TTY))
+
+    # Correccion de ingreso por llenar evacuacion (reglas del usuario). Si el
+    # LGN del pool no entra en el tope, se baja la recuperacion segun las
+    # reglas y se vuelve a modelar el pool con esos coeficientes — el mismo
+    # mecanismo que usaba la correccion legacy de TTY_TBX.py, ahora como dato.
+    coefs_corregidos = None
+    if activa:
+        coefs_corregidos = aplicar_a_planta(
+            reglas=correccion,
+            retenidos_planta=retenidos_TTY,
+            retenidos_vol_pool=retenidos_vol_pool,
+            capacidad_evacuacion=CAPACIDAD_EVACUACION_TTY,
+            cortes_compuestos=mapa_cortes(ETANO, PROPANO, BUTANOS, GASOLINA),
+        )
+    if coefs_corregidos is not None:
+        tabla_pool, gas_rico_IN, gas_residual_OUT, retenidos_pool, retenidos_vol_pool = (
+            _modelar_pool(coefs_corregidos))
 
     vol_pool = float(tabla_pool['Volumen_inyectado'].values.sum())
 
@@ -142,6 +176,9 @@ def modelar_TTY(matriz_inyecciones, calcular_retenidos, tabla_total_flujos_direc
     flujos['lgn_unitario'] = lgn_unitario
     flujos['lgn_asignado'] = lgn_unitario * flujos['vol_asignado']
     flujos['activa'] = activa
+    flujos['correccion_aplicada'] = coefs_corregidos is not None
+    if coefs_corregidos is not None:
+        flujos['correccion_descripcion'] = describir_reglas(correccion)
 
     # Escalado pro-rata al volumen asignado. Volumen_relativo y la cromato no
     # cambian: es el mismo gas, solo una porcion.

@@ -134,6 +134,11 @@ class PlantaConfig:
     # y se inyecta al pool por el mismo mecanismo que una derivacion.
     cromas_extra: list[dict] = field(default_factory=list)
 
+    # Correccion de ingreso por llenar evacuacion: dict de reglas declarativas
+    # (ver pipeline/plantas/correccion.py). None = sin correccion. Es un dict
+    # plano JSON-friendly, asi que viaja en los escenarios sin adaptador.
+    correccion: dict | None = None
+
     # Marca de origen: las tres de siempre vs las que agrego el usuario.
     es_base: bool = False
 
@@ -166,6 +171,7 @@ class PlantaConfig:
             "activa": self.activa,
             "color": self.color,
             "es_base": self.es_base,
+            "correccion": self.correccion,
             "cromas_extra": [
                 {
                     "vol_derivacion": float(c["vol_derivacion"]),
@@ -197,6 +203,7 @@ class PlantaConfig:
             activa=bool(d.get("activa", True)),
             color=d.get("color", "#EAF2F8"),
             es_base=bool(d.get("es_base", False)),
+            correccion=d.get("correccion"),
             cromas_extra=[
                 {
                     "vol_derivacion": float(c["vol_derivacion"]),
@@ -244,7 +251,8 @@ PRESETS = {
 
 def crear_planta(nombre, preset=None, compuestos=None, nombre_pool=None,
                  retenidos=None, capacidad_evacuacion=None, capacidad_ingreso=None,
-                 conexiones=None, color=None, es_base=False, **features) -> PlantaConfig:
+                 conexiones=None, color=None, es_base=False, correccion=None,
+                 **features) -> PlantaConfig:
     """Unica puerta de entrada para armar una planta.
 
     Parameters
@@ -303,6 +311,7 @@ def crear_planta(nombre, preset=None, compuestos=None, nombre_pool=None,
         retenidos=_normalizar_retenidos(retenidos, compuestos, nombre),
         conexiones=list(conexiones or []),
         es_base=es_base,
+        correccion=correccion,
         **base,
     )
 
@@ -350,6 +359,18 @@ def _leer(fuente, clave):
     return getattr(fuente, clave)
 
 
+def _leer_opcional(fuente, clave, default=None):
+    """Como `_leer`, pero tolerante: la clave puede no existir.
+
+    Se usa para las correcciones por llenar evacuacion, que `main.py` y los
+    `config` viejos no definen. Sin esto, sembrar el registro desde ahi
+    rompería con KeyError por una feature que ni usan.
+    """
+    if isinstance(fuente, dict):
+        return fuente.get(clave, default)
+    return getattr(fuente, clave, default)
+
+
 def registro_base(config, retenidos_rtp, compuestos, tbx_en_servicio: bool) -> dict[str, PlantaConfig]:
     """Reconstruye la cascada actual con la estructura nueva.
 
@@ -381,6 +402,7 @@ def registro_base(config, retenidos_rtp, compuestos, tbx_en_servicio: bool) -> d
             tope=_leer(config, "MAX_DERIVACION_TTY_TBX_A_TTY_DP"), comparte_pool=True)],
         activa=tbx_en_servicio,
         es_base=True,
+        correccion=_leer_opcional(config, "CORRECCION_TTY_TBX"),
     )
 
     dp = crear_planta(
@@ -392,6 +414,7 @@ def registro_base(config, retenidos_rtp, compuestos, tbx_en_servicio: bool) -> d
             destino="MEGA", proporcion=1.0,
             tope=_leer(config, "MAX_DERIVACION_TTY_DP_A_MEGA"), comparte_pool=False)],
         es_base=True,
+        correccion=_leer_opcional(config, "CORRECCION_TTY_DP"),
     )
 
     mega = crear_planta(
@@ -400,6 +423,7 @@ def registro_base(config, retenidos_rtp, compuestos, tbx_en_servicio: bool) -> d
         capacidad_evacuacion=_leer(config, "CAPACIDAD_EVACUACION_MEGA"),
         capacidad_ingreso=_leer(config, "CAPACIDAD_MEGA"),
         es_base=True,
+        correccion=_leer_opcional(config, "CORRECCION_MEGA"),
     )
 
     return {p.nombre: p for p in (tbx, dp, mega)}

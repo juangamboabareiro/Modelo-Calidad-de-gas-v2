@@ -44,6 +44,7 @@ from pipeline.plantas.registro import (
     INFINITO,
 )
 from io_.cromatografias_planta import cargar_cromas_extra, resumen as resumen_cromas
+from ui.correccion_editor import bloque_correccion
 
 
 CLAVE = "registro_plantas"
@@ -177,6 +178,7 @@ def panel_plantas(retenidos_rtp, compuestos, config, tbx_en_servicio: bool,
 
     _bloque_general(planta, factor_mm)
     _bloque_retenidos(planta, compuestos)
+    _bloque_correccion(planta)
     _bloque_conexiones(planta, registro, factor_mm)
 
     errores, avisos = validar_registro(registro)
@@ -454,6 +456,21 @@ def _bloque_general(planta: PlantaConfig, factor_mm):
 
         planta.color = st.color_picker(
             "Color en el diagrama", value=planta.color, key=f"col_{planta.nombre}")
+
+
+def _bloque_correccion(planta: PlantaConfig):
+    """Correccion de ingreso por llenar evacuacion, por planta.
+
+    Delega en `ui.correccion_editor.bloque_correccion` (el mismo bloque que la
+    sidebar). Se le pasa `_rerun` para que el boton "Interpretar" respete el
+    scope del fragment y no redibuje los otros tabs. Las reglas quedan en la
+    planta, asi viajan con el escenario y llegan a `modelar_planta`.
+    """
+    planta.correccion = bloque_correccion(
+        planta.nombre, f"pl_{planta.nombre}",
+        reglas_iniciales=getattr(planta, "correccion", None),
+        rerun=_rerun,
+    )
 
 
 def _describir_preset(preset: str) -> str:
