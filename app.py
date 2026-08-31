@@ -1600,7 +1600,11 @@ def ejecutar_serie_sandbox(path, params, periodos, registro, intervenciones,
 
     filas_plantas, filas_areas, filas_pool, filas_mezcla = [], [], [], []
     fallos = []
-    barra = st.sidebar.progress(0.0, text="Serie del escenario...")
+    # OJO: st.progress a secas, NO st.sidebar.progress. Esta funcion corre
+    # desde adentro del fragment del editor, y un fragment no puede escribir
+    # en contenedores de afuera (la sidebar) que no reservaron slot en el run
+    # completo: StreamlitAPIException. La barra se dibuja donde esta el boton.
+    barra = st.progress(0.0, text="Serie del escenario...")
 
     for i, periodo in enumerate(periodos, start=1):
         etiqueta = pd.Timestamp(periodo).strftime("%m-%Y")
@@ -2008,8 +2012,12 @@ with tab_sandbox:
     # path/params/referencia para que el tab no tenga que conocerlos.
     def _correr_serie_sandbox(registro, intervenciones,
                               _ref=resultados_fisicos):
-        return ejecutar_serie_sandbox(
-            input_path, PARAMS, periodos_serie, registro, intervenciones, _ref)
+        # Igual que la serie oficial: los `print` del pipeline multiplicados
+        # por N meses tapan la consola; se capturan y descartan.
+        with capturar():
+            return ejecutar_serie_sandbox(
+                input_path, PARAMS, periodos_serie, registro, intervenciones,
+                _ref)
 
     _serie_ctx = ({"periodos": periodos_serie, "correr": _correr_serie_sandbox}
                   if periodos_serie else None)
