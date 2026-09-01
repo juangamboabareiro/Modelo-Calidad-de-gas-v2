@@ -65,6 +65,4 @@ def panel_bienvenida():
         "**MMm³/d**. Cargar `25` donde va `25000` no falla — devuelve números "
         "mal. Ante un resultado raro, revisá esto primero.")
 
-    st.caption("Una vez que corras el pipeline, el tab **Asistente** tiene un "
-               "glosario, un buscador sobre toda la documentación y una "
-               "lectura automática de la corrida. Funciona sin conexión.")
+    
