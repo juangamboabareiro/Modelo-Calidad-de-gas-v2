@@ -98,6 +98,7 @@ from ui.diagnosticos import capturar, mostrar as mostrar_diagnostico
 
 from ui.tab_plantas import panel_tab_plantas
 from ui.tab_graphs import panel_graphs
+from ui.tab_asistente import panel_asistente
 from ui.correccion_editor import bloque_correccion
 
 
@@ -1883,6 +1884,23 @@ resultados = st.session_state.get("resultados")
 
 if resultados is None:
     st.info("Elegí los parámetros en la barra lateral y apretá **Ejecutar pipeline**.")
+
+    # El asistente va ANTES del `st.stop()` a propósito: es justo el momento en
+    # que más se lo necesita. Alguien que abre el tablero por primera vez todavía
+    # no sabe qué es "el pipeline" ni qué va a ver después, y si el asistente
+    # viviera solo entre los tabs no lo encontraría nunca. Acá el buscador y el
+    # glosario ya funcionan (no dependen de la corrida) y el explicador dice
+    # simplemente que todavía no hay nada que leer.
+    #
+    # `_render_seguro` se define más abajo en el script, así que este aislamiento
+    # se escribe a mano: la regla es la misma, un fallo del asistente no puede
+    # dejar la pantalla de bienvenida en blanco.
+    st.divider()
+    try:
+        panel_asistente(None, PARAMS, serie=None, factor_mm=FACTOR_MM)
+    except Exception as _e:  # noqa: BLE001 - el asistente nunca tumba la app
+        st.error(f"El asistente falló: {type(_e).__name__}: {_e}")
+
     st.stop()
 
 # ---------------------------------------------------------------------------
@@ -1910,9 +1928,9 @@ flujos_plantas = resultados["flujos_plantas"]
 tbx_en_servicio_res = resultados["tbx_en_servicio"]
 
 (tab_resumen, tab_graphs, tab_cascada, tab_tablas, tab_red,
- tab_tbx, tab_dp, tab_mega, tab_sandbox) = st.tabs(
+ tab_tbx, tab_dp, tab_mega, tab_sandbox, tab_asistente) = st.tabs(
     ["Resumen", "Graphs", "Cascada", "Tablas totales", "Mapa de la red",
-     "TTY - TBX", "TTY - Dew Point", "MEGA", "Plantas (sandbox)"]
+     "TTY - TBX", "TTY - Dew Point", "MEGA", "Plantas (sandbox)", "Asistente"]
 )
 
 with tab_resumen:
@@ -2025,6 +2043,13 @@ with tab_sandbox:
     _render_seguro("Plantas (sandbox)", panel_tab_plantas, resultados_fisicos,
                    resultados_fisicos.get("params_efectivos", PARAMS), FACTOR_MM,
                    serie_ctx=_serie_ctx)
+
+
+with tab_asistente:
+    # Igual que el sandbox: los resultados FÍSICOS (STD). El explicador declara
+    # sus unidades y no tiene que seguir el selector de la sidebar.
+    _render_seguro("Asistente", panel_asistente, resultados_fisicos, PARAMS,
+                   serie=st.session_state.get("serie"), factor_mm=FACTOR_MM)
 
 
 def _mostrar_planta_contenido(nombre_planta, datos):

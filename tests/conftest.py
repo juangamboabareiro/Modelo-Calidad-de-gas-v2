@@ -38,6 +38,25 @@ def croma_uniforme(compuestos):
     return {c: 1.0 / n for c in compuestos}
 
 
+# Pesos moleculares reales (kg/kmol); Z fijo e ilustrativo. No pretenden ser
+# una referencia numérica: para los invariantes lo único que importa es que
+# `calcular_retenidos` quede LINEAL en el volumen, y eso vale con cualquier
+# tabla de propiedades. Se usa la función REAL del dominio, no un stub, así el
+# test ejercita el cálculo de verdad.
+_MW = {"C1": 16.043, "C2": 30.070, "C3": 44.097, "iC4": 58.123, "nC4": 58.123,
+       "iC5": 72.150, "nC5": 72.150, "nC6": 86.177, "nC7": 100.204,
+       "nC8": 114.231, "nC9": 128.258, "nC10": 142.285,
+       "N2": 28.014, "CO2": 44.010}
+
+
+@pytest.fixture
+def propiedades(compuestos):
+    return pd.DataFrame({
+        "Peso molecular [kg/kmol]": [_MW.get(c, 50.0) for c in compuestos],
+        "Z": [0.99] * len(compuestos),
+    }, index=list(compuestos))
+
+
 @pytest.fixture
 def params_base():
     """Los mismos parámetros que usa el smoke test de ui/test_tab_plantas."""
@@ -63,8 +82,10 @@ def retenidos_rtp(compuestos):
 
 
 @pytest.fixture
-def comunes(compuestos, croma_uniforme):
+def comunes(compuestos, croma_uniforme, propiedades):
     """Dos pools: TTY (600 vía yacimiento + 600 directo) y MEGA (400)."""
+    from domain.propiedades_gas import calcular_retenidos
+
     yac = pd.DataFrame([
         {"Area": "Chivo", "HUB": "H1", "Gasoducto": "VMN",
          "Volumen_inyectado": 600.0, **croma_uniforme},
@@ -77,8 +98,8 @@ def comunes(compuestos, croma_uniforme):
     ])
     return dict(
         matriz_inyecciones=None,
-        calcular_retenidos=None,
-        propiedades=None,
+        calcular_retenidos=calcular_retenidos,
+        propiedades=propiedades,
         COMPUESTOS=compuestos,
         tabla_total_yacimientos=yac,
         tabla_total_flujos_directos=fdi,

@@ -42,7 +42,7 @@ TOPES = [0.0, 10.0, 900.0, 1e12]
 
 
 @pytest.mark.parametrize(
-    "disp,vmax,tope", itertools.product(DISPONIBLES, MAXIMOS, TOPES))
+    "disp,vmax,tope", list(itertools.product(DISPONIBLES, MAXIMOS, TOPES)))
 def test_balance_de_un_eslabon(disp, vmax, tope):
     f = repartir_flujo_planta(
         vol_disponible=disp, vol_maximo=vmax,
@@ -83,6 +83,34 @@ def test_planta_holgada_no_deriva_ni_bypasea():
 # ---------------------------------------------------------------------------
 # lgn_unitario: dominio.md §2.4 — los retenidos son LINEALES en el volumen.
 # ---------------------------------------------------------------------------
+
+def test_calcular_retenidos_es_lineal_en_el_volumen(compuestos, propiedades,
+                                                    croma_uniforme):
+    """La premisa de la que depende TODO el escalado pro-rata del modelo.
+
+    `dominio.md` §2.4 afirma que el escalado es exacto, no una aproximación.
+    Eso sólo vale si `calcular_retenidos` es lineal en `volumen_total`. Se
+    verifica contra la función real del dominio: si alguien le agrega un
+    término no lineal (una corrección por saturación, por ejemplo), "modelar
+    el pool una vez y escalar" deja de ser válido y hay que re-modelar por
+    volumen — un cambio de fondo que este test obliga a notar.
+    """
+    from domain.propiedades_gas import calcular_retenidos
+    from domain.ctes_gas import PRESION_BASE, CONSTANTE_GAS, TEMPERATURA_BASE
+
+    gas_rico = pd.Series(croma_uniforme).reindex(list(compuestos))
+    retencion = pd.Series({c: 0.4 for c in compuestos}).reindex(list(compuestos))
+
+    def corrida(vol):
+        return calcular_retenidos(propiedades, vol, retencion, gas_rico,
+                                  PRESION_BASE, CONSTANTE_GAS, TEMPERATURA_BASE)
+
+    base = corrida(1000.0)
+    triple = corrida(3000.0)
+
+    assert (float(triple.values.sum()) - 3.0 * float(base.values.sum())) < 1e-6
+    assert float(base.values.sum()) > 0, "el escenario necesita retención real"
+
 
 def _retenidos_vol(escala=1.0):
     return pd.Series({"etano": 10.0, "propano": 40.0,

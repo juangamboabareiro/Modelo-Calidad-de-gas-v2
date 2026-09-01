@@ -31,15 +31,19 @@ GRANDE = 1.0e9            # capacidad que no limita
 
 
 @pytest.fixture
-def comunes_pool_unico(compuestos, croma_uniforme):
+def comunes_pool_unico(compuestos, croma_uniforme, propiedades):
     import pandas as pd
+    from domain.propiedades_gas import calcular_retenidos
+
     yac = pd.DataFrame([
         {"Area": "AreaX", "HUB": "H1", "Gasoducto": POOL,
          "Volumen_inyectado": VOL_POOL, **croma_uniforme},
     ])
     fdi = yac.iloc[0:0].copy()
-    return dict(matriz_inyecciones=None, calcular_retenidos=None,
-                propiedades=None, COMPUESTOS=compuestos,
+    return dict(matriz_inyecciones=None,
+                calcular_retenidos=calcular_retenidos,
+                propiedades=propiedades,
+                COMPUESTOS=compuestos,
                 tabla_total_yacimientos=yac,
                 tabla_total_flujos_directos=fdi)
 
