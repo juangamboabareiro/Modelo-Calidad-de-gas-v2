@@ -100,6 +100,7 @@ from ui.tab_plantas import panel_tab_plantas
 from ui.tab_graphs import panel_graphs
 from ui.tab_asistente import panel_asistente
 from ui.bienvenida import panel_bienvenida
+from ui.perfil import cronometrar, mostrar_perfil
 from ui.correccion_editor import bloque_correccion
 
 
@@ -1906,7 +1907,13 @@ unidad_volumen = st.sidebar.radio(
 # El original en STD queda para lo que RE-CALCULA: sandbox (comunes) y serie.
 resultados_fisicos = resultados
 if unidad_volumen == UNIDAD_9300:
-    resultados, _avisos_unidad = construir_vista_9300(resultados)
+    # OJO: esto corre en CADA rerun y copia todas las tablas. Está
+    # cronometrado porque es candidato a ser el bloque más caro del script, y
+    # no se ve en ningún tab. Si el perfil lo pone arriba, hay dos caminos:
+    # memoizarlo (más CPU ahorrada, una copia permanente más en memoria) o
+    # convertir sólo lo que cada tab muestra (más trabajo, menos memoria).
+    with cronometrar("Vista 9.300 (copia de todas las tablas)"):
+        resultados, _avisos_unidad = construir_vista_9300(resultados)
     for _a in _avisos_unidad:
         st.sidebar.warning(_a)
 st.sidebar.caption(f"Mostrando volúmenes en **{unidad_volumen}**.")
@@ -1996,7 +2003,7 @@ def _render_seguro(nombre_tab: str, fn, *args, **kwargs):
         st.exception(e)
 
 
-with tab_graphs:
+with tab_graphs, cronometrar("Graphs"):
     _render_seguro("Graphs", panel_graphs, resultados,
                    serie=st.session_state.get("serie"),
                    fallos=st.session_state.get("serie_fallos"),
@@ -2004,13 +2011,13 @@ with tab_graphs:
                    serie_sandbox=st.session_state.get("serie_sandbox"),
                    fallos_sandbox=st.session_state.get("serie_sandbox_fallos"))
 
-with tab_tablas:
+with tab_tablas, cronometrar("Tablas totales"):
     _render_seguro("Tablas totales", panel_tablas, resultados)
 
-with tab_red:
+with tab_red, cronometrar("Mapa de la red"):
     _render_seguro("Mapa de la red", panel_mapa, resultados)
 
-with tab_sandbox:
+with tab_sandbox, cronometrar("Plantas (sandbox)"):
     # El sandbox RE-MODELA la fisica desde comunes: necesita el original STD.
     st.caption("El sandbox re-modela la física y trabaja siempre en "
                "**MMm³/d STD**, independiente del selector de unidad.")
@@ -2035,7 +2042,7 @@ with tab_sandbox:
                    serie_ctx=_serie_ctx)
 
 
-with tab_asistente:
+with tab_asistente, cronometrar("Asistente"):
     # Igual que el sandbox: los resultados FÍSICOS (STD). El explicador declara
     # sus unidades y no tiene que seguir el selector de la sidebar.
     _render_seguro("Asistente", panel_asistente, resultados_fisicos, PARAMS,
@@ -2091,5 +2098,10 @@ def _mostrar_planta_contenido(nombre_planta, datos):
 
 for _tab, _nombre in ((tab_tbx, "TTY - TBX"), (tab_dp, "TTY - Dew Point"),
                       (tab_mega, "MEGA")):
-    with _tab:
+    with _tab, cronometrar(_nombre):
         _render_seguro(_nombre, _mostrar_planta_contenido, _nombre, plantas[_nombre])
+
+
+# Con la variable de entorno PERFIL=1, un expander al pie con lo que tardó cada
+# tab en este rerun. Apagado no cuesta nada. Ver `ui/perfil.py`.
+mostrar_perfil()

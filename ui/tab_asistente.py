@@ -82,15 +82,27 @@ def ia_disponible() -> bool:
     return IA_IMPORTABLE and hay_credencial()
 
 
-@st.cache_data(show_spinner=False)
+# `cache_resource` y no `cache_data`: la diferencia es que `cache_data` COPIA
+# el valor en cada acceso (lo deserializa del caché), y estas dos funciones
+# devuelven estructuras grandes —el índice son ~300 KB— a las que se accede en
+# CADA rerun de la app. `cache_resource` devuelve siempre el mismo objeto, sin
+# copiar. Es seguro porque nadie las modifica: se leen y se descartan.
+@st.cache_resource(show_spinner=False)
 def _docs_crudos() -> str:
-    """Los .md concatenados para el contexto de la IA.
-
-    Cacheado porque leer y concatenar la carpeta entera en cada rerun se nota.
-    Se limpia con el mismo botón de reindexar del buscador.
-    """
+    """Los .md concatenados para el contexto de la IA."""
     docs, _ = cargar_docs()
     return docs
+
+
+@st.cache_resource(show_spinner=False)
+def _obsoletos_cacheado(carpeta: str = "docs") -> list[str]:
+    """Archivos zombis en docs/.
+
+    Cacheado porque recorre el árbol de directorios, y eso se hacía en cada
+    rerun. En un disco local es despreciable; sobre una carpeta sincronizada
+    (OneDrive y similares) cada llamada al filesystem puede costar mucho más.
+    """
+    return obsoletos_presentes(carpeta)
 
 
 def contexto_ia(resultados, serie, factor_mm) -> tuple[str, str]:
@@ -105,16 +117,20 @@ def contexto_ia(resultados, serie, factor_mm) -> tuple[str, str]:
 # Capa sin IA
 # ===========================================================================
 
-@st.cache_data(show_spinner=False)
+@st.cache_resource(show_spinner=False)
 def _indice_cacheado(carpeta: str = "docs"):
     """Se relee al limpiar el caché (botón Reindexar) o al cambiar el código."""
     return construir_indice(carpeta)
 
 
 def cuerpo_documentacion(docs: str = "", sufijo: str = "tab"):
-    """Buscador + glosario, y el chat plegado abajo si hay credencial."""
-    indice = _indice_cacheado()
+    """Buscador + glosario, y el chat plegado abajo si hay credencial.
 
+    OJO con el orden: el índice NO se toca hasta que hay una consulta. Este
+    cuerpo se ejecuta en cada rerun de la app —Streamlit renderiza todos los
+    tabs, no sólo el que estás mirando—, y la ruta normal (sin consulta) tiene
+    que ser lo más barata posible: el glosario sale de un dict en memoria.
+    """
     col_a, col_b = st.columns([4, 1])
     consulta = col_a.text_input(
         "Buscá en la documentación", key=f"buscador_q_{sufijo}",
@@ -124,30 +140,33 @@ def cuerpo_documentacion(docs: str = "", sufijo: str = "tab"):
                     help="Volvé a leer los documentos de docs/."):
         _indice_cacheado.clear()
         _docs_crudos.clear()
+        _obsoletos_cacheado.clear()
         st.rerun()
 
-    if not indice:
-        st.warning("No encontré documentos en `docs/`: el buscador no tiene "
-                   "material.")
-        return
-
-    # Los archivos que el README da por eliminados pero siguen en la carpeta:
-    # el buscador ya los ignora, pero mientras estén ahí alguien los va a abrir
-    # a mano y creerles.
-    sobrantes = obsoletos_presentes()
-    if sobrantes:
-        st.warning(
-            f"Estos archivos figuran como eliminados en el README pero siguen "
-            f"en `docs/`: `{'`, `'.join(sobrantes)}`. El buscador los ignora; "
-            "conviene borrarlos del repo.")
-
     if not consulta:
-        st.caption(f"{len(indice)} secciones indexadas. El buscador **no genera "
-                   "texto**: muestra los fragmentos reales.")
+        st.caption("Buscá una palabra para ver los fragmentos de la "
+                   "documentación. El buscador **no genera texto**: muestra "
+                   "los fragmentos reales.")
         with st.expander("📚 Glosario: los términos del tablero", expanded=True):
             for termino, datos in GLOSARIO.items():
                 st.markdown(f"**{termino}** — {datos['texto']}")
     else:
+        indice = _indice_cacheado()
+        if not indice:
+            st.warning("No encontré documentos en `docs/`: el buscador no "
+                       "tiene material.")
+            return
+
+        # Los archivos que el README da por eliminados pero siguen en la
+        # carpeta: el buscador ya los ignora, pero mientras estén ahí alguien
+        # los va a abrir a mano y creerles.
+        sobrantes = _obsoletos_cacheado()
+        if sobrantes:
+            st.warning(
+                f"Estos archivos figuran como eliminados en el README pero "
+                f"siguen en `docs/`: `{'`, `'.join(sobrantes)}`. El buscador "
+                "los ignora; conviene borrarlos del repo.")
+
         # El glosario primero: si preguntan "qué es la cascada", la definición
         # curada le gana a cualquier sección de un documento técnico.
         for termino, texto in buscar_glosario(consulta):
@@ -423,9 +442,33 @@ def _chat_agente(resultados, docs, resumen, factor_mm, sufijo):
 # El tab
 # ===========================================================================
 
-def panel_asistente(resultados: dict | None, params=None,
-                    serie: dict | None = None, factor_mm: float = 1000.0):
-    """El asistente como tab. `resultados` FÍSICOS (STD) o None."""
+def _envolver_en_fragment(funcion):
+    """Devuelve `funcion` envuelta en `st.fragment`, si esta versión lo tiene.
+
+    Mismo patrón que `ui/tab_plantas.py`. Sin esto, escribir una letra en el
+    buscador rerenderiza el script ENTERO —los otros nueve tabs, el graphviz,
+    el mapa y las tablas—, que es exactamente lo que hace que el asistente se
+    sienta lento aunque él mismo sea barato.
+
+    Se prueban los dos nombres porque `st.fragment` se llamó
+    `st.experimental_fragment` entre 1.33 y 1.36, y se verifica que lo devuelto
+    sea invocable: si no, se degrada al comportamiento de siempre en vez de
+    romper el tab.
+    """
+    for nombre in ("fragment", "experimental_fragment"):
+        decorador = getattr(st, nombre, None)
+        if decorador is None:
+            continue
+        try:
+            envuelta = decorador(funcion)
+        except Exception:
+            continue
+        if callable(envuelta):
+            return envuelta
+    return funcion
+
+
+def _cuerpo_panel(resultados, params, serie, factor_mm):
     st.subheader("Asistente")
     st.caption(
         "Buscador de documentación, lectura automática de la corrida y guía "
@@ -447,3 +490,12 @@ def panel_asistente(resultados: dict | None, params=None,
 
     with tab_sb:
         cuerpo_sandbox(resultados, docs, resumen, factor_mm, sufijo="tab")
+
+
+_panel_envuelto = _envolver_en_fragment(_cuerpo_panel)
+
+
+def panel_asistente(resultados: dict | None, params=None,
+                    serie: dict | None = None, factor_mm: float = 1000.0):
+    """El asistente como tab. `resultados` FÍSICOS (STD) o None."""
+    _panel_envuelto(resultados, params, serie, factor_mm)
