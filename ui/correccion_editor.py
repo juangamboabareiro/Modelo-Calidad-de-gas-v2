@@ -29,6 +29,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from ui.compat import ancho
 from pipeline.plantas.correccion import (
     CORTES, MODO_LIBRE, MODO_PASA, REGLAS_LEGACY,
     copiar_reglas, describir_reglas, es_porcentaje, es_tn, reglas_vacias,
@@ -150,7 +151,7 @@ def bloque_correccion(nombre_planta: str, key: str,
                  for c in CORTES]
 
         editado = st.data_editor(
-            pd.DataFrame(filas), hide_index=True, use_container_width=True,
+            pd.DataFrame(filas), hide_index=True, **ancho(),
             key=f"{clave}_ed",
             column_config={
                 "Corte": st.column_config.TextColumn(disabled=True),
@@ -195,7 +196,7 @@ def bloque_correccion(nombre_planta: str, key: str,
                  "como opera la planta, no un mecanismo de desborde.")
 
         if col_b.button("Reglas clasicas", key=f"{clave}_leg",
-                        use_container_width=True,
+                        **ancho(),
                         help="Las de siempre: gasolina y etano pasan (0%), y "
                              "el tope se llena primero con butanos y despues "
                              "con propano."):

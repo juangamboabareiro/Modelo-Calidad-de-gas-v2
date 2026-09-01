@@ -32,6 +32,8 @@ import io
 
 import streamlit as st
 
+from ui.compat import dataframe as mostrar_df
+
 
 # Marcas que elevan un mensaje a advertencia visible.
 #
@@ -187,15 +189,14 @@ def mostrar(registro: list[str], titulo: str = "Diagnostico del pipeline") -> No
         with st.expander("Resolucion de cromatografia por tabla"):
             import pandas as pd
 
-            st.dataframe(
+            mostrar_df(
                 pd.DataFrame(resumen).T.rename(
                     columns={
                         "ruta": "Por ruta (Area, Gasoducto)",
                         "clave": "Por clave (Area+Sufijo)",
                         "sin_resolver": "Sin resolver",
                     }
-                ),
-                use_container_width=True,
+                )
             )
             st.caption(
                 "'Por ruta' cuenta las filas resueltas con premisa de gasoducto; "

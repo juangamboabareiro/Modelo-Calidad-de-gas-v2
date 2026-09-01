@@ -1,0 +1,1047 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pipeline de gas — Documento informativo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#FBFAF7; --panel:#FFFFFF; --ink:#22303C; --ink-soft:#5A6B7A;
+    --petrol:#0E4A66; --petrol-dark:#0A3348; --petrol-tint:#EBF2F6;
+    --amber:#C97A10; --amber-tint:#FCF3E3;
+    --excel:#1E6B3C; --excel-tint:#EAF5EE;
+    --line:#DDE3E8;
+    --in-bg:#d4f4dd; --in-bd:#2e7d32;
+    --mid-bg:#e3f2fd; --mid-bd:#1565c0;
+    --out-bg:#FFB74D; --out-bd:#E68A00;
+    --fin-bg:#0D0847;
+    --mono:'IBM Plex Mono',Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.65 'IBM Plex Sans',system-ui,Segoe UI,sans-serif;}
+  a{color:var(--petrol)}
+  code{font-family:var(--mono);font-size:.88em;background:var(--petrol-tint);
+    padding:.1em .35em;border-radius:4px;}
+  pre{background:var(--petrol-dark);color:#DCE8F0;padding:16px 20px;border-radius:8px;
+    overflow-x:auto;font-family:var(--mono);font-size:13.5px;line-height:1.6;}
+  pre code{background:none;color:inherit;padding:0}
+
+  /* ---- layout ---- */
+  .wrap{display:grid;grid-template-columns:250px minmax(0,1fr);max-width:1200px;margin:0 auto;gap:0}
+  nav{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;
+    padding:32px 18px 32px 24px;border-right:1px solid var(--line);font-size:13.5px;}
+  nav .navtitle{font-weight:600;color:var(--petrol-dark);margin-bottom:10px;font-size:12.5px;
+    letter-spacing:.02em}
+  nav a{display:block;color:var(--ink-soft);text-decoration:none;padding:4px 8px;
+    border-radius:5px;border-left:2px solid transparent}
+  nav a:hover{color:var(--petrol);background:var(--petrol-tint)}
+  main{padding:0 48px 80px;max-width:880px}
+  @media(max-width:980px){.wrap{display:block}nav{display:none}main{padding:0 20px 60px}}
+
+  /* ---- hero ---- */
+  header{padding:52px 0 30px;border-bottom:1px solid var(--line);margin-bottom:36px}
+  header h1{font-size:31px;line-height:1.2;margin:0 0 10px;color:var(--petrol-dark);
+    font-weight:600;letter-spacing:-.01em}
+  header .sub{color:var(--ink-soft);max-width:64ch;margin:0 0 26px}
+  .flowstrip{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:13px;font-weight:500}
+  .flowstrip .chip{padding:6px 13px;border-radius:20px;border:1px solid}
+  .flowstrip .arrow{color:var(--ink-soft)}
+  .fs-in{background:var(--in-bg);border-color:var(--in-bd);color:#12501e}
+  .fs-mid{background:var(--mid-bg);border-color:var(--mid-bd);color:#0d3d73}
+  .fs-out{background:var(--out-bg);border-color:var(--out-bd);color:#5c3400}
+  .fs-fin{background:var(--fin-bg);border-color:var(--fin-bg);color:#fff}
+
+  /* ---- headings & sections ---- */
+  h2{font-size:23px;color:var(--petrol-dark);font-weight:600;margin:56px 0 6px;
+    padding-top:10px;letter-spacing:-.01em}
+  h2 .num{color:var(--out-bd);font-family:var(--mono);font-size:16px;margin-right:10px}
+  h3{font-size:17px;font-weight:600;margin:32px 0 8px;color:var(--ink)}
+  .lede{color:var(--ink-soft);margin-top:0}
+  hr.sec{border:0;border-top:2px solid var(--petrol);width:44px;margin:0 0 18px}
+
+  /* ---- tables ---- */
+  table{border-collapse:collapse;width:100%;margin:16px 0 24px;font-size:14px}
+  th{background:var(--petrol-tint);color:var(--petrol-dark);text-align:left;
+    padding:9px 12px;border-bottom:2px solid var(--petrol);font-weight:600}
+  td{padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  tr:nth-child(even) td{background:#F5F7F8}
+  td code,th code{white-space:nowrap}
+  .tblwrap{overflow-x:auto}
+
+  /* ---- callouts ---- */
+  .excel,.warn,.note{border-radius:8px;padding:13px 18px;margin:16px 0;font-size:14.5px}
+  .excel{background:var(--excel-tint);border-left:4px solid var(--excel)}
+  .excel .tag,.warn .tag,.note .tag{display:block;font-weight:600;font-size:12.5px;margin-bottom:3px}
+  .excel .tag{color:var(--excel)}
+  .warn{background:var(--amber-tint);border-left:4px solid var(--amber)}
+  .warn .tag{color:var(--amber)}
+  .note{background:var(--petrol-tint);border-left:4px solid var(--petrol)}
+  .note .tag{color:var(--petrol)}
+
+  /* ---- diagrams ---- */
+  .diagram{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:26px 22px;margin:22px 0}
+  .diagram .dtitle{font-weight:600;color:var(--petrol-dark);margin:0 0 4px;font-size:15px}
+  .diagram .dsub{color:var(--ink-soft);font-size:13px;margin:0 0 18px}
+  .stage{margin:0 0 4px}
+  .stage .slabel{font-size:11.5px;font-weight:600;color:var(--ink-soft);
+    letter-spacing:.04em;margin-bottom:7px}
+  .chips{display:flex;flex-wrap:wrap;gap:7px}
+  .n{padding:5px 11px;border-radius:6px;border:1px solid;font-family:var(--mono);
+    font-size:12px;line-height:1.4}
+  .n-in{background:var(--in-bg);border-color:var(--in-bd);color:#12501e}
+  .n-mid{background:var(--mid-bg);border-color:var(--mid-bd);color:#0d3d73}
+  .n-out{background:var(--out-bg);border-color:var(--out-bd);color:#5c3400;font-weight:500}
+  .n-fin{background:var(--fin-bg);border-color:var(--fin-bg);color:#fff;font-weight:500}
+  .dArrow{display:flex;align-items:center;gap:10px;margin:10px 0 12px;padding-left:6px}
+  .dArrow .glyph{color:var(--petrol);font-size:17px;line-height:1}
+  .dArrow .albl{font-size:12.5px;color:var(--ink-soft);font-style:italic}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:18px;padding-top:14px;
+    border-top:1px dashed var(--line);font-size:12.5px;color:var(--ink-soft)}
+  .legend .sw{display:inline-block;width:11px;height:11px;border-radius:3px;
+    border:1px solid;margin-right:5px;vertical-align:-1px}
+
+  /* cascada horizontal */
+  .casc{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;margin-top:6px}
+  .casc .pnode{flex:1 1 150px;min-width:150px;border-radius:10px;padding:12px 14px;
+    border:1.5px solid;text-align:center}
+  .casc .parrow{display:flex;flex-direction:column;justify-content:center;align-items:center;
+    padding:0 8px;min-width:104px}
+  .casc .parrow .glyph{color:var(--petrol);font-size:19px}
+  .casc .parrow .albl{font-size:11px;color:var(--ink-soft);text-align:center;line-height:1.35}
+  .pnode .pn-t{font-weight:600;font-size:14.5px}
+  .pnode .pn-s{font-size:12px;margin-top:3px;opacity:.85}
+  .downrow{display:flex;justify-content:space-around;margin-top:6px}
+  .downrow .dcol{text-align:center;font-size:12px;color:var(--ink-soft)}
+  .downrow .glyph{color:var(--amber);font-size:16px;display:block}
+
+  details{margin:14px 0}
+  summary{cursor:pointer;color:var(--petrol);font-weight:500;font-size:14px}
+
+  .toc-cols{columns:2;column-gap:36px;font-size:15px}
+  .toc-cols a{text-decoration:none;display:block;padding:3px 0}
+  @media(max-width:700px){.toc-cols{columns:1}}
+
+  footer{margin-top:70px;padding-top:18px;border-top:1px solid var(--line);
+    color:var(--ink-soft);font-size:13px}
+
+  @media print{
+    nav{display:none}.wrap{display:block}main{max-width:none;padding:0}
+    body{background:#fff}pre{white-space:pre-wrap}
+    h2{break-after:avoid}.diagram,table,.excel,.warn,.note{break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav>
+  <div class="navtitle">CONTENIDO</div>
+  <a href="#s1">1 · Visión general</a>
+  <a href="#s2">2 · Diccionario Python ↔ Excel</a>
+  <a href="#s3">3 · El archivo de inputs</a>
+  <a href="#s4">4 · Etapa pre-plantas</a>
+  <a href="#s5">5 · Diagrama pre-plantas</a>
+  <a href="#s6">6 · Modelado de plantas</a>
+  <a href="#s7">7 · Diagrama de la cascada</a>
+  <a href="#s8">8 · Invariantes y validaciones</a>
+  <a href="#s10">10 · El sandbox de plantas</a>
+  <a href="#s11">11 · Cómo correr el dashboard</a>
+  <a href="#s12">12 · El asistente</a>
+</nav>
+
+<main>
+
+<header>
+  <h1>Pipeline de gas — Documento informativo</h1>
+  <p class="sub">Explicativo del flujo completo del pipeline: qué contiene el archivo de
+  inputs, cómo se construyen las tablas totales (etapa <strong>pre-plantas</strong>) y cómo
+  se modela la <strong>cascada de plantas</strong>. Este pipeline es la migración a Python
+  del modelo Excel de balance de gas y producción de LGN, así que cada paso está explicado
+  con su equivalente en Excel: si sabés armar un BUSCARV y una tabla dinámica, podés seguir
+  todo el documento.</p>
+  <div class="flowstrip">
+    <span class="chip fs-in">inputs.xlsx</span><span class="arrow">→</span>
+    <span class="chip fs-mid">preprocesamiento e inyección</span><span class="arrow">→</span>
+    <span class="chip fs-out">tablas totales</span><span class="arrow">→</span>
+    <span class="chip fs-mid">pools de planta</span><span class="arrow">→</span>
+    <span class="chip fs-fin">cascada TBX → DP → MEGA</span>
+  </div>
+</header>
+
+<!-- ==================== 1 ==================== -->
+<h2 id="s1"><span class="num">1</span>Visión general</h2>
+<hr class="sec">
+<p>El pipeline resuelve <strong>un período</strong> (un mes) y responde dos preguntas:</p>
+<ol>
+  <li><strong>¿Cuánto gas, de qué composición, viaja por cada ruta <code>(Area, Gasoducto)</code>?</strong><br>
+      → lo responden las <strong>tablas totales</strong> (etapa pre-plantas).</li>
+  <li><strong>¿Cuánto de ese gas trata cada planta, cuánto LGN retiene y qué gas residual
+      devuelve al sistema de transporte?</strong><br>
+      → lo responde la <strong>cascada de plantas</strong> (etapa post-tablas).</li>
+</ol>
+<p>Libro de Excel gigante con dos "zonas":</p>
+<ul>
+  <li>La <strong>zona de armado</strong>: hojas que se cruzan entre sí con BUSCARV para
+  llegar a tres tablas maestras donde cada fila es una ruta de gas con su volumen y su
+  composición química.</li>
+  <li>La <strong>zona de modelo</strong>: sobre esas tablas maestras se aplica un
+  Autofiltro para armar el "pool" de cada planta, y una lógica de cascada (una cadena de
+  fórmulas MIN y restas) reparte el gas entre las plantas.</li>
+</ul>
+
+<!-- ==================== 2 ==================== -->
+<h2 id="s2"><span class="num">2</span>Diccionario Python ↔ Excel</h2>
+<hr class="sec">
+<p>Cada vez que en este documento (o en el código) aparezca una de estas operaciones, esto
+es lo que significa en términos de Excel:</p>
+<div class="tblwrap"><table>
+<tr><th>Operación del pipeline</th><th>Equivalente en Excel</th></tr>
+<tr><td><code>merge</code> por una clave</td><td><strong>BUSCARV / XLOOKUP</strong>: traer columnas de otra hoja usando una clave. Un merge por dos claves (<code>Area</code> y <code>Gasoducto</code>) es un BUSCARV con <strong>clave concatenada</strong> (<code>=A2&amp;"-"&amp;B2</code>) o un XLOOKUP con dos condiciones.</td></tr>
+<tr><td><code>melt</code> (despivotear)</td><td><strong>Anular dinamización de columnas</strong> en Power Query: pasar de una tabla ancha (una columna por mes/destino) a una tabla larga (una fila por Area-Mes o Area-Destino).</td></tr>
+<tr><td><code>groupby</code> + suma/promedio</td><td><strong>Tabla dinámica</strong> (o SUMAR.SI.CONJUNTO / PROMEDIO.SI.CONJUNTO).</td></tr>
+<tr><td><code>query</code> / filtro</td><td><strong>Autofiltro</strong> o FILTRAR().</td></tr>
+<tr><td>Multiplicar dos columnas</td><td><strong>Columna calculada</strong>: <code>=C2*D2</code> arrastrada hacia abajo.</td></tr>
+<tr><td>Mezcla ponderada por volumen</td><td><strong>SUMAPRODUCTO(volúmenes; composiciones) / SUMA(volúmenes)</strong>.</td></tr>
+<tr><td><code>fillna(0)</code></td><td><strong>SI.ERROR(BUSCARV(...);0)</strong>: si el BUSCARV da #N/A, poner cero.</td></tr>
+<tr><td><code>drop_duplicates</code></td><td><strong>Quitar duplicados</strong> (pestaña Datos).</td></tr>
+<tr><td>Reparto pro-rata</td><td><strong>Regla de tres</strong>: cada fila recibe su proporción del total.</td></tr>
+<tr><td>Validación / reporte</td><td>Una <strong>celda de control</strong>: <code>=SI(SUMA(A:A)&lt;&gt;SUMA(B:B);"⚠ REVISAR";"OK")</code>.</td></tr>
+</table></div>
+<div class="note"><span class="tag">Cambio clave de mentalidad</span>
+En el Excel original, un BUSCARV que no encuentra da <strong>#N/A</strong> y se ve; en el
+pipeline, los "no encontrados" <strong>se reportan por consola y después se rellenan con
+0</strong>. El reporte es el equivalente de ver los #N/A: si dice "N filas SIN
+cromatografía", hay N BUSCARV fallando.</div>
+
+<!-- ==================== 3 ==================== -->
+<h2 id="s3"><span class="num">3</span>El archivo de inputs (<code>inputs.xlsx</code>)</h2>
+<hr class="sec">
+<p>Todo el pipeline se alimenta de un único Excel con <strong>16 hojas</strong>. Se agrupan
+en cuatro familias según su rol.</p>
+
+<h3>3.1 Resumen de hojas</h3>
+<div class="tblwrap"><table>
+<tr><th>Hoja</th><th>Forma</th><th>Qué es, en criollo</th></tr>
+<tr><td><code>Inyeccion-9300</code></td><td>121 × 158 (<code>Area</code>, <code>Cuenca</code> + una columna por mes desde 2020)</td><td>El volumen que inyecta cada área, mes a mes, en condiciones 9300. Es la hoja "madre" del volumen.</td></tr>
+<tr><td><code>Coeficientes</code></td><td>121 × 157 (<code>Area</code> + una columna por mes)</td><td>El factor para pasar ese volumen a condiciones estándar. Se divide celda a celda contra la anterior.</td></tr>
+<tr><td><code>Yacimientos</code></td><td>102 × 24 (<code>Inyección</code>, <code>Area</code> + una columna por destino)</td><td>La matriz de qué área manda gas a qué gasoducto (marcas/proporciones por destino).</td></tr>
+<tr><td><code>Flujos-Directos</code></td><td>22 × 24 (misma estructura)</td><td>Orígenes que inyectan <strong>directo</strong> a un gasoducto, con su propio volumen. Agrupados en Secundaria / Terciaria / Cuaternaria.</td></tr>
+<tr><td><code>Detalles-HUBs</code></td><td>23 × 18 (<code>Gasoducto</code>, <code>Area</code> + destinos)</td><td>El detalle de qué áreas componen cada HUB.</td></tr>
+<tr><td><code>Matriz-Inyecciones</code></td><td>29 × 21 (<strong>ancha</strong>: una columna por destino, las áreas como valores adentro)</td><td>Qué áreas alimentan cada destino/pool</td></tr>
+<tr><td><code>Coefs-Iny-Areas</code></td><td>160 × 98 (<code>Area</code>, <code>Gasoducto</code> + una columna por mes desde 2025)</td><td>El coeficiente de reparto de cada ruta, mes a mes. Es "qué porcentaje del gas del área va por este gasoducto este mes".</td></tr>
+<tr><td><code>Premisas-Areas</code></td><td>133 × 21 (<code>Area</code>, <code>Sufijo</code>, <code>Salida</code> + 14 compuestos + extras)</td><td>La <strong>cromatografía</strong> de cada área: la composición del gas en fracción molar (C1, C2, C3... N2, CO2). Cada fila suma 1.</td></tr>
+<tr><td><code>Sufijos-Planta</code></td><td>9 × 2 (clave concatenada <code>Area-Gasoducto</code> → sufijo)</td><td>La tablita auxiliar que desambigua cuando un área tiene <strong>dos cromatografías</strong> según a dónde mande el gas.</td></tr>
+<tr><td><code>Cromas-HUBs</code> / <code>Cromas-HUBs_llena</code></td><td>18 × 15 (<code>HUB</code> + compuestos)</td><td>La cromatografía de salida de cada HUB (18 hubs).</td></tr>
+<tr><td><code>Retenidos-RTP</code></td><td>4 × 16 (<code>Planta</code> + compuestos + <code>Consumo</code>)</td><td>Qué fracción de cada compuesto retiene cada planta como LGN, más su consumo propio.</td></tr>
+<tr><td><code>Propiedades</code></td><td>18 × 22 (<code>Compuesto</code> + 21 propiedades)</td><td>Peso molecular, factor de compresibilidad, factor b, etc. de cada compuesto. La "tabla de constantes" químicas. <strong>Sigue siendo obligatoria</strong> aunque el modelo ya no reporte calidad de gas: el cálculo de retenidos usa peso molecular y compresibilidad.</td></tr>
+<tr><td><code>Constantes-GAS</code></td><td>1 × 4</td><td>T base = 15 °C, P base = 101,325 kPa, R = 8,314472, Conversión = 4,1868.</td></tr>
+<tr><td><code>Plantas-Yacimientos</code></td><td>102 × 2 (<code>Area</code>, <code>HUB</code>)</td><td>El mapa de qué área pertenece a qué HUB. Un BUSCARV clásico.</td></tr>
+<tr><td><code>Mapa</code></td><td>77 × 2 (<code>Num</code>, <code>Area</code>)</td><td>Numeración de referencia de las áreas.</td></tr>
+</table></div>
+
+<h3>3.2 Notas por hoja (lo que hay que saber para no romperse)</h3>
+
+<p><strong><code>Inyeccion-9300</code> + <code>Coeficientes</code></strong> — Son el punto
+de partida de todo el volumen. El pipeline hace literalmente
+<code>Inyeccion-9300 ÷ Coeficientes</code>, celda a celda, como si en una hoja nueva
+pusieras <code>='Inyeccion-9300'!C2/Coeficientes!B2</code> y arrastraras a toda la matriz.
+Las celdas sin volumen (~3.500 en una corrida típica) se rellenan con 0 y se reporta: es
+esperado.</p>
+
+<p><strong><code>Matriz-Inyecciones</code></strong> — La hoja más particular. Tiene una
+columna por cada uno de los 20 destinos (<code>BdP</code>, <code>NEUI</code>,
+<code>VMN</code>, <code>CO (Troncal)</code>, <code>NEUII</code>, <code>GPM</code>,
+<code>GPA (a MEGA)</code>, <code>MEGA</code>, <code>TOTAL - APE / ASR</code>,
+<code>Pampa EM - BM</code>, <code>VMS</code>, <code>TBX El Porton</code>,
+<code>Otros</code>, <code>YPF - RDM</code>, <code>CO (Paralelo)</code>,
+<code>GPA (a Chile)</code>, <code>Pampa SCH</code>, <code>VM LIQ</code>, <code>TTY</code>,
+<code>TTY-PC</code>) y las <strong>áreas escritas como valores adentro de cada
+columna</strong> — como si cada columna fuera una lista de las áreas que alimentan ese
+destino. Dos consecuencias:</p>
+<ul>
+  <li>Como las áreas están desparramadas a lo ancho, no se pueden estandarizar sus nombres
+  al cargar la hoja; primero hay que <strong>despivotearla</strong> (Power Query: anular
+  dinamización) y recién ahí limpiar los nombres.</li>
+  <li>Circulan <strong>dos versiones que no son intercambiables</strong>: la
+  <em>despivoteada</em> (larga, para los BUSCARV del pipeline) y la <em>cruda y ancha</em>
+  (para validar que el pool de cada planta contenga exactamente los orígenes que la columna
+  declara). Reemplazar una por otra rompe la validación.</li>
+</ul>
+<p><code>TTY</code> y <code>MEGA</code> son los <code>nombre_pool</code> de las plantas: la
+columna con la que se filtra su gas. <code>TBX El Porton</code> y <code>VM LIQ</code> son
+destinos reales sin planta modelada todavía.</p>
+
+<p><strong><code>Yacimientos</code> vs <code>Flujos-Directos</code></strong> — Misma
+estructura de columnas, distinto significado. <code>Yacimientos</code> son áreas
+productoras (102 filas) cuyo volumen viene de <code>Inyeccion-9300</code>.
+<code>Flujos-Directos</code> son orígenes que inyectan directo a un gasoducto, en tres
+niveles (<code>Secundaria</code>, <code>Terciaria</code>, <code>Cuaternaria</code>), con su
+volumen escrito en la propia hoja.</p>
+<div class="warn"><span class="tag">⚠ Ojo</span>
+<code>Flujos-Directos</code> incluye orígenes que <strong>no son áreas</strong>
+(<code>TTY</code>, <code>MEGA</code>, <code>BdP</code>, <code>VM LIQ</code>...): son
+gasoductos o plantas actuando como origen. </div>
+
+<p><strong><code>Premisas-Areas</code></strong> — La fuente de la cromatografía. Cada fila
+es una composición en fracción molar (14 compuestos: C1..nC10, N2, CO2; cada fila suma 1)
+más columnas informativas (<code>Croma Modelo</code>, <code>Premisa cromatografías</code>,
+<code>Observaciones inyecciones</code>, <code>Propietario</code>). El pipeline la parte en
+dos tablas de búsqueda:</p>
+<ul>
+  <li><strong>por ruta</strong> <code>(Area, Gasoducto)</code> — usa la columna
+  <code>Salida</code>; hoy está vacía, así que este BUSCARV <strong>nunca encuentra
+  nada</strong> (ver §9, hallazgo 5);</li>
+  <li><strong>por clave</strong> <code>Area + Sufijo</code> — la vía que efectivamente
+  funciona: una clave concatenada tipo <code>=Area&amp;Sufijo</code>.</li>
+</ul>
+<div class="warn"><span class="tag">⚠ Dato sucio conocido</span>
+<code>aguadadecastro</code> está cargada <strong>dos veces con cromatografías
+distintas</strong> y sin sufijo. El pipeline se queda con la primera — exactamente igual
+que hacía el VLOOKUP del Excel original, que siempre devuelve la primera coincidencia.</div>
+
+<p><strong><code>Sufijos-Planta</code></strong> — Nueve pares
+<code>Area-Gasoducto → sufijo</code> con tres valores posibles (<code>Otra</code>,
+<code>Planta</code>, <code>TBX</code>). Resuelve el caso de <strong>Fortín de
+Piedra</strong>, que tiene dos cromas según el destino: hacia <code>VMS</code> /
+<code>YPF - RDM</code> / <code>MEGA</code> va la croma <code>Otra</code>; hacia
+<code>CO (Paralelo)</code> / <code>NEUII</code> / <code>GPM</code> va la croma
+<code>Planta</code>. También asigna el sufijo <code>TBX</code> a las cuatro áreas que van a
+<code>TBX El Porton</code> (Bajo del Toro, Narambuena, El Portón, Los Toldos II Este). Dos
+fragilidades:</p>
+<ul>
+  <li>la hoja <strong>no tiene fila de encabezado</strong>: la primera fila de datos quedó
+  como título de columna (mirala en el Excel: el "encabezado" dice
+  <code>Fortin de Piedra-VMS | Otra</code>, que es un dato). El pipeline lo detecta y lo
+  recupera, pero es bueno saberlo antes de "arreglar" la hoja;</li>
+  <li>la clave se corta por el <strong>primer guion</strong>, como un
+  <code>=IZQUIERDA(A2; ENCONTRAR("-";A2)-1)</code>: se rompe si algún día un área tiene
+  guion en el nombre (hay una validación que lo chequea en cada corrida).</li>
+</ul>
+
+<p><strong><code>Retenidos-RTP</code></strong> — Cuatro filas, una por planta, con la
+fracción retenida por compuesto y el consumo propio. El cruce con las plantas es un BUSCARV
+<strong>por nombre exacto</strong>: renombrar una fila en el Excel deja esa planta con
+retención cero, <strong>sin error visible</strong>. El mapeo a los nombres de la interfaz:</p>
+<table>
+<tr><th>Excel</th><th>Interfaz / registro</th><th>Consumo</th></tr>
+<tr><td><code>TBX</code></td><td>TTY - TBX</td><td>3,0 %</td></tr>
+<tr><td><code>Dew point</code></td><td>TTY - Dew Point</td><td>0,8 %</td></tr>
+<tr><td><code>TBX MEGA</code></td><td>MEGA</td><td>4,0 %</td></tr>
+<tr><td><code>TBX EL PORTON</code></td><td>(sin planta modelada todavía)</td><td>4,0 %</td></tr>
+</table>
+<p>En los valores se ve el perfil de cada tecnología: TBX retiene casi todo el propano en
+adelante (C3 = 0,96; C4+ ≈ 1,0), Dew Point apenas roza el C3 (0,0135) y recién se vuelve
+eficiente de C5 en adelante, y MEGA es la única que retiene etano (C2 = 0,45).</p>
+
+<p><strong><code>Cromas-HUBs</code> / <code>Cromas-HUBs_llena</code></strong> —
+Cromatografía de salida de 18 hubs (<code>NEUBA I</code>, <code>Hub Centro (resto)</code>,
+<code>Aguada Pichana Este</code>, <code>Fortin De Piedra</code>, <code>La Calera</code>,
+<code>Loma Campana</code>, etc.). Las usa el ruteo de hubs para reemplazar la croma
+individual de un área por la croma mezclada de su hub cuando esa área inyecta a una
+planta.</p>
+
+<p><strong><code>Constantes-GAS</code></strong> — Una sola fila: T base 15 °C, P base
+101,325 kPa, constante de gas 8,314472 y factor de conversión 4,1868 (kcal ↔ kJ).</p>
+
+<!-- ==================== 4 ==================== -->
+<h2 id="s4"><span class="num">4</span>Etapa pre-plantas: construcción de las tablas totales</h2>
+<hr class="sec">
+<p>El objetivo de toda esta etapa es llegar a <strong>tres tablas maestras</strong>
+("tablas totales") donde cada fila es una ruta <code>(Area, Gasoducto)</code> con:</p>
+<ul>
+  <li>su <strong>volumen del período</strong> (<code>Volumen_inyectado</code>),</li>
+  <li>su <strong>cromatografía</strong> (fracción molar por compuesto),</li>
+  <li>y el <strong>volumen por compuesto</strong> (<code>Vol_C1</code>, <code>Vol_C2</code>, ...).</li>
+</ul>
+
+<h3>4.1 Paso a paso (con su traducción a Excel)</h3>
+
+<p><strong>Paso 0 — Carga y limpieza.</strong> Se cargan las hojas, se estandarizan los
+nombres de área (sacar tildes, espacios, mayúsculas — lo que en Excel harías con ESPACIOS +
+MINUSC + SUSTITUIR), se valida que los destinos declarados existan, y se arman las dos
+tablas de búsqueda de cromatografía (por ruta y por clave <code>Area+Sufijo</code>).</p>
+
+<p><strong>Paso 1 — Inyección estándar.</strong></p>
+<div class="excel"><span class="tag">EN EXCEL</span>
+Hoja nueva, <code>='Inyeccion-9300'!C2/Coeficientes!B2</code>, arrastrar a toda la matriz.</div>
+<pre><code>inyeccion_std = Inyeccion-9300 ÷ Coeficientes        (celda a celda, por mes)</code></pre>
+
+<p><strong>Paso 2 — Inyección con HUB.</strong></p>
+<div class="excel"><span class="tag">EN EXCEL</span>
+Una tabla dinámica que promedia por año, más un BUSCARV contra
+<code>Plantas-Yacimientos</code> para traer la columna <code>HUB</code>.</div>
+<p>El resultado es <code>inyeccion</code>: cuánto inyecta cada área, con su hub asignado.</p>
+
+<p><strong>Paso 3 — Reparto a destinos.</strong></p>
+<div class="excel"><span class="tag">EN EXCEL</span>
+Primero despivotear la <code>Matriz-Inyecciones</code> en Power Query (anular dinamización:
+pasa de "una columna por destino" a una lista larga de pares Area–Destino), y después
+cruzar contra <code>inyeccion</code> con BUSCARV.</div>
+<p>El resultado es <code>inyeccion_area</code>, la tabla larga de rutas área → destino. Acá
+se reporta si hay áreas sin destino en la matriz (hoy: 19, de las cuales 6 tienen volumen —
+ver §9). En Excel serían filas cuyo BUSCARV contra la matriz da #N/A: gas que no llega a
+ningún lado.</p>
+
+<p><strong>Paso 4 — Las tres tablas de rutas.</strong> En paralelo se preparan las tablas
+intermedias, una por tipo de origen:</p>
+<div class="tblwrap"><table>
+<tr><th>Tabla intermedia</th><th>Se arma cruzando...</th><th>Qué representa</th></tr>
+<tr><td><code>inyeccion_yacimientos_areas</code></td><td><code>Yacimientos</code> + <code>inyeccion_area</code></td><td>áreas productoras que inyectan vía gasoducto</td></tr>
+<tr><td><code>detalles_hubs_areas</code></td><td><code>Detalles-HUBs</code> + <code>Plantas-Yacimientos</code></td><td>el detalle de qué áreas componen cada hub</td></tr>
+<tr><td><code>inyeccion_flujos_directos</code></td><td><code>Flujos-Directos</code> (sola)</td><td>orígenes que inyectan directo, con volumen propio</td></tr>
+</table></div>
+
+<p><strong>Paso 5 — Tablas totales.</strong> Para cada ruta
+<code>(Area, Gasoducto)</code> se hace:</p>
+<ol>
+  <li><strong>Volumen del período</strong>: BUSCARV contra <code>inyeccion_std</code>
+  filtrada al mes considerado (los yacimientos) o el volumen propio de la hoja (los flujos
+  directos).</li>
+  <li><strong>Coeficiente de reparto</strong>: BUSCARV con clave doble
+  <code>(Area, Gasoducto)</code> contra <code>Coefs-Iny-Areas</code> en la columna del mes
+  considerado, y una columna calculada:
+  <pre><code>Volumen_inyectado = Volumen × Coef_Inyeccion        (=C2*D2, arrastrado)</code></pre></li>
+  <li><strong>Cromatografía</strong>: el BUSCARV de la premisa. Primero intenta por ruta
+  <code>(Area, Gasoducto)</code> — hoy nunca encuentra — y cae al BUSCARV por clave
+  concatenada <code>Area+Sufijo</code>, donde el sufijo sale de
+  <code>Sufijos-Planta</code>.</li>
+  <li><strong>Filas sin croma</strong>: los #N/A se dejan visibles a propósito, se reportan
+  (<code>N filas SIN cromatografia</code>) y recién después se les aplica el
+  <code>SI.ERROR(...;0)</code>. Un cero acá significa "gas vacío": la fila aporta volumen
+  pero <strong>cero LGN</strong>. Si el reporte crece de una corrida a otra, hay que ir a
+  mirar por qué.</li>
+  <li><strong>Volumen por compuesto</strong>: columna calculada por compuesto:
+  <code>Vol_C1 = fracción molar de C1 × Volumen_inyectado</code>, y así con los 14.</li>
+</ol>
+<div class="note"><span class="tag">Historia del diseño (paso 3 de arriba)</span>
+La versión vieja hacía BUSCARV solo por <code>Area</code> y después "Quitar duplicados".
+Eso agarraba las dos filas de Fortín de Piedra (croma <code>Planta</code> y croma
+<code>Otra</code>) y se quedaba con la primera según el orden de la hoja — o sea, el
+destino no importaba y a veces le tocaba la croma equivocada. Con la clave
+<code>Area+Sufijo</code> el cruce es 1 a 1, y el "Quitar duplicados" se eliminó
+<strong>a propósito</strong>: si volviera a haber duplicados, taparlos escondería un
+problema real de la hoja.</div>
+
+<p><strong>Paso 6 — Ruteo de hubs (solo en el dashboard).</strong> Las rutas área → planta
+de las áreas que tienen hub se reemplazan por rutas hub → planta con la cromatografía del
+hub (<code>Cromas-HUBs</code>).</p>
+<div class="warn"><span class="tag">⚠ Importante</span>
+Este paso <strong>pisa</strong> la tabla <code>Total Yacimientos</code> con la versión
+ajustada: todo lo que se calcula después (el mapa, las tablas del panel, los CSV) ve esa
+versión. Las rutas hacia gasoductos y las áreas sin hub (<code>HUB == "Otros"</code>) no se
+tocan.</div>
+
+<h3>4.2 Salidas de la etapa</h3>
+<table>
+<tr><th>CSV</th><th>Contenido</th></tr>
+<tr><td><code>TBL_TTL_YCS.csv</code></td><td>Total Yacimientos (ajustada por hubs si corre en el dashboard)</td></tr>
+<tr><td><code>TBL_TTL_DTOS.csv</code></td><td>Total Flujos Directos</td></tr>
+<tr><td><code>TBL_TTL_DH.csv</code></td><td>Total Detalles HUBs</td></tr>
+<tr><td><code>TBL_TTL_HUBS.csv</code></td><td>Total HUBs del ruteo (solo si hay filas)</td></tr>
+</table>
+
+<h3>4.3 Columnas que nacen en el pipeline</h3>
+<p>Ninguna de estas viene de una hoja del Excel; son "columnas calculadas" que crea el
+pipeline:</p>
+<div class="tblwrap"><table>
+<tr><th>Columna</th><th>Nace en</th><th>Qué es</th></tr>
+<tr><td><code>Volumen_inyectado</code></td><td>tablas totales</td><td>volumen del período para ese <code>(Area, Gasoducto)</code></td></tr>
+<tr><td><code>Sufijo</code>, <code>Clave_croma</code></td><td>búsqueda de cromatografía</td><td>las claves concatenadas del BUSCARV de premisas</td></tr>
+<tr><td><code>Origen_tabla</code></td><td>armado del pool</td><td>de qué tabla total salió cada fila (<code>flujos_directos</code> / <code>yacimientos</code> / <code>hubs</code> / <code>derivacion</code>)</td></tr>
+<tr><td><code>Volumen_pool</code></td><td>modelado de planta</td><td>el volumen del pool antes del reparto pro-rata</td></tr>
+</table></div>
+
+<!-- ==================== 5 ==================== -->
+<h2 id="s5"><span class="num">5</span>Diagrama del flujo pre-plantas</h2>
+<hr class="sec">
+
+<div class="diagram">
+  <p class="dtitle">De las 16 hojas del Excel a las tablas totales</p>
+  <p class="dsub">Cada fila es una etapa; las flechas indican la operación (en lenguaje Excel) que conecta una etapa con la siguiente.</p>
+
+  <div class="stage">
+    <div class="slabel">INPUTS — las hojas del Excel</div>
+    <div class="chips">
+      <span class="n n-in">inyeccion_9300</span><span class="n n-in">coeficientes</span>
+      <span class="n n-in">yacimientos</span><span class="n n-in">flujos_directos</span>
+      <span class="n n-in">detalles_hubs</span><span class="n n-in">matriz_inyecciones</span>
+      <span class="n n-in">coefs_iny_areas</span><span class="n n-in">premisas_areas</span>
+      <span class="n n-in">sufijos_planta</span><span class="n n-in">cromas_hubs</span>
+      <span class="n n-in">plantas_yacimientos</span><span class="n n-in">propiedades</span>
+      <span class="n n-in">constantes_GAS</span>
+    </div>
+  </div>
+
+  <div class="dArrow"><span class="glyph">▼</span><span class="albl">división celda a celda (9300 ÷ coeficientes) · tabla dinámica por año · BUSCARV del HUB</span></div>
+
+  <div class="stage">
+    <div class="slabel">TABLAS INTERMEDIAS — la inyección</div>
+    <div class="chips">
+      <span class="n n-mid">inyeccion_std</span><span class="n n-mid">inyeccion</span>
+      <span class="n n-mid">inyeccion_area</span>
+    </div>
+  </div>
+
+  <div class="dArrow"><span class="glyph">▼</span><span class="albl">despivotear la matriz (Power Query) + BUSCARV contra cada hoja de rutas</span></div>
+
+  <div class="stage">
+    <div class="slabel">TABLAS DE RUTAS — una por tipo de origen</div>
+    <div class="chips">
+      <span class="n n-mid">inyeccion_yacimientos_areas</span>
+      <span class="n n-mid">detalles_hubs_areas</span>
+      <span class="n n-mid">inyeccion_flujos_directos</span>
+      <span class="n n-mid">premisas_por_ruta</span>
+      <span class="n n-mid">premisas_por_clave</span>
+    </div>
+  </div>
+
+  <div class="dArrow"><span class="glyph">▼</span><span class="albl">BUSCARV del mes (Coefs-Iny-Areas) · BUSCARV de croma (clave Area+Sufijo) · =Volumen×Coef · SUMAPRODUCTO de propiedades</span></div>
+
+  <div class="stage">
+    <div class="slabel">TABLAS TOTALES — las salidas</div>
+    <div class="chips">
+      <span class="n n-out">tabla_total_yacimientos</span>
+      <span class="n n-out">tabla_total_flujos_directos</span>
+      <span class="n n-out">tabla_total_detalles_hubs</span>
+      <span class="n n-out">tabla_total_hubs (ruteo)</span>
+    </div>
+  </div>
+
+  <div class="dArrow"><span class="glyph">▼</span><span class="albl">Autofiltro: Gasoducto == nombre_pool (TTY / MEGA)</span></div>
+
+  <div class="stage">
+    <div class="chips">
+      <span class="n n-fin">pools de planta</span>
+      <span class="n n-fin">cascada: TBX → DP → MEGA</span>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><span class="sw" style="background:var(--in-bg);border-color:var(--in-bd)"></span>hojas del Excel (inputs)</span>
+    <span><span class="sw" style="background:var(--mid-bg);border-color:var(--mid-bd)"></span>tablas intermedias</span>
+    <span><span class="sw" style="background:var(--out-bg);border-color:var(--out-bd)"></span>tablas totales (salidas)</span>
+    <span><span class="sw" style="background:var(--fin-bg);border-color:var(--fin-bg)"></span>etapa de modelo</span>
+  </div>
+</div>
+
+<details>
+<summary>Ver este diagrama como código Mermaid (para editarlo en mermaid.live o en la wiki)</summary>
+<pre><code>flowchart TB
+    subgraph Inputs
+      direction TB
+      COEFS[coeficientes]
+      I9300[inyeccion_9300]
+      PA[premisas_areas]
+      SP[sufijos_planta]
+      PROPS[propiedades]
+      MI[matriz_inyecciones]
+      FD[flujos_directos]
+      Y[yacimientos]
+      DH[detalles_hubs]
+      CIA[coefs_iny_areas]
+      PY[plantas_yacimientos]
+      CTESGAS[constantes_GAS]
+      CH[cromas_hubs]
+    end
+    subgraph Tablas_Intermedias
+        ISTD[inyeccion_std]
+        I[inyeccion]
+        IA[inyeccion_area]
+    end
+    subgraph Yacimientos_G[Yacimientos]
+        IYA[inyeccion_yacimientos_areas]
+    end
+    subgraph Detalles_Hubs
+        DHA[detalles_hubs_areas]
+    end
+    subgraph Flujos_Directos
+        IFD[inyeccion_flujos_directos]
+    end
+    subgraph Cromatografia
+        PPR[premisas_por_ruta]
+        PPC[premisas_por_clave]
+    end
+    subgraph Outputs
+        direction TB
+        TTY_[tabla_total_yacimientos]
+        TTFD[tabla_total_flujos_directos]
+        TTDH[tabla_total_detalles_hubs]
+        TTH[tabla_total_hubs]
+    end
+    I9300 -- "división celda a celda" --&gt; ISTD
+    COEFS --&gt; ISTD
+    ISTD -- "tabla dinámica por año" --&gt; I
+    PY -- BUSCARV --&gt; I
+    I --&gt; IA
+    MI -- "despivotear + BUSCARV" --&gt; IA
+    Y --&gt; IYA
+    IA -- BUSCARV --&gt; IYA
+    PY --&gt; IYA
+    DH --&gt; DHA
+    PY -- BUSCARV --&gt; DHA
+    FD --&gt; IFD
+    PA --&gt; PPR
+    PA --&gt; PPC
+    SP -- "clave Area+Sufijo" --&gt; PPC
+    IYA --&gt; TTY_
+    IFD --&gt; TTFD
+    DHA --&gt; TTDH
+    CIA -- "BUSCARV del mes" --&gt; TTY_
+    CIA -- "BUSCARV del mes" --&gt; TTFD
+    ISTD --&gt; TTY_
+    PPC -- "BUSCARV de croma" --&gt; TTY_
+    PPC -- "BUSCARV de croma" --&gt; TTFD
+    PPC -- "BUSCARV de croma" --&gt; TTDH
+    PROPS -- SUMAPRODUCTO --&gt; Outputs
+    CTESGAS --&gt; Outputs
+    CH --&gt; TTH
+    TTY_ --&gt; TTH
+    Outputs --&gt; POOLS[pools de planta - Autofiltro Gasoducto == nombre_pool]
+    POOLS --&gt; CASCADA[cascada: TBX --&gt; DP --&gt; MEGA]
+    classDef input fill:#d4f4dd,stroke:#2e7d32,color:#000;
+    classDef intermedia fill:#e3f2fd,stroke:#1565c0,color:#000;
+    classDef output fill:#FFB74D,color:#FFF,stroke:#FFA500;
+    classDef output_final fill:#0D0847,color:#FFF,stroke:#000;
+    class COEFS,I9300,PA,SP,PROPS,MI,FD,Y,DH,CIA,PY,CTESGAS,CH input;
+    class ISTD,I,IA,IYA,DHA,IFD,PPR,PPC intermedia;
+    class TTY_,TTFD,TTDH,TTH output;
+    class POOLS,CASCADA output_final;</code></pre>
+</details>
+
+<!-- ==================== 6 ==================== -->
+<h2 id="s6"><span class="num">6</span>Etapa post-tablas: el modelado de plantas</h2>
+<hr class="sec">
+<p>Acá cambia la lógica por completo: ya no se cruzan tablas, se <strong>reparte un pool de
+gas en cascada</strong> entre plantas con capacidades finitas. Es la parte del Excel
+original que era una cadena de fórmulas MIN, restas y reglas de tres.</p>
+
+<h3>6.1 El pool</h3>
+<div class="excel"><span class="tag">EN EXCEL</span>
+Autofiltro sobre las dos tablas totales, columna <code>Gasoducto</code>, elegir el nombre
+de la planta. Las filas que quedan visibles son el pool.</div>
+<p>El pool de cada planta se arma filtrando por <code>Gasoducto == nombre_pool</code>
+(<code>TTY</code> para el tren TBX/Dew Point, <code>MEGA</code> para MEGA) sobre
+<strong>dos</strong> tablas totales a la vez:</p>
+<ul>
+  <li><code>Total Flujos Directos</code> → orígenes que le llegan por gasoducto,</li>
+  <li><code>Total Yacimientos</code> → áreas que le inyectan directo.</li>
+</ul>
+<p>Cada fila queda etiquetada con <code>Origen_tabla</code> para trazar de qué tabla salió.
+Esto importa especialmente para MEGA y TBX El Portón, que reciben inyección directa de
+áreas además del gas por gasoducto (el armado anterior perdía esa traza). Si el ruteo de
+hubs está activo, las áreas con hub entran al pool como su hub, con la croma del hub.</p>
+<p>La cromatografía del pool es la <strong>mezcla ponderada por volumen</strong> de todas
+sus filas: <code>SUMAPRODUCTO(volúmenes; fracción de C1) / SUMA(volúmenes)</code>,
+compuesto por compuesto.</p>
+
+<h3>6.2 La cascada: dos trenes, un pool</h3>
+<p>El punto conceptual más importante: <strong>TTY-TBX y TTY-Dew Point no son dos plantas
+en paralelo</strong>. Son dos trenes de procesamiento sobre el <em>mismo</em> pool de gas
+(la misma columna <code>TTY</code> de la matriz de inyecciones). El pool se reparte en
+cascada:</p>
+<pre><code>pre-PM  :  pool TTY ──────────────► DP ──(sobra)──► MEGA ──(sobra)──► bypass
+           (TBX no está en servicio)  └──(resto)──► bypass DP
+
+post-PM :  pool TTY ──► TBX ──(sobra)──► DP ──(sobra)──► MEGA ──(sobra)──► bypass
+                         └──(resto)──► bypass TBX</code></pre>
+<ul>
+  <li><strong>Post-PM</strong> (TBX en servicio): el pool entra por TBX; lo que TBX no
+  puede tratar pasa a Dew Point; el sobrante de DP se deriva a MEGA; y lo que MEGA tampoco
+  absorbe sale por bypass directo al sistema de transporte.</li>
+  <li><strong>Pre-PM</strong> (TBX fuera de servicio): el pool entra directo a Dew Point.</li>
+</ul>
+<p><strong>Qué significa "llenarse".</strong> Una planta se llena cuando agota su capacidad
+de <strong>evacuación de LGN</strong> (tn/d), no su capacidad de ingreso de gas. El ingreso
+de gas rara vez limita; entra al cálculo solo como un MIN adicional. En fórmula:</p>
+<pre><code>vol_asignado = MIN(vol_disponible ; vol_que_llena_la_evacuación_de_LGN ; tope_de_ingreso)</code></pre>
+
+<h3>6.5 Los flujos por eslabón</h3>
+<p>Cada planta produce un registro de flujos con estas columnas:</p>
+<div class="tblwrap"><table>
+<tr><th>Campo</th><th>Significado</th></tr>
+<tr><td><code>vol_disponible</code></td><td>gas que llega al eslabón (el pool, o el derivado del anterior)</td></tr>
+<tr><td><code>vol_maximo</code></td><td>tope de la planta (capacidad de evacuación de LGN, + el MIN de ingreso)</td></tr>
+<tr><td><code>vol_asignado</code></td><td>gas efectivamente tratado</td></tr>
+<tr><td><code>vol_derivado</code></td><td>sobrante que pasa al eslabón siguiente</td></tr>
+<tr><td><code>bypass</code></td><td>gas que sale directo a transporte sin tratar</td></tr>
+<tr><td><code>lgn_unitario</code> / <code>lgn_asignado</code></td><td>LGN por unidad de gas y total (tn/d)</td></tr>
+</table></div>
+
+
+<h3>6.6 Después de la cascada</h3>
+<ul>
+  <li><strong>Gas residual por planta</strong>: la composición que sale de cada tren, que
+  es la de entrada menos lo retenido. Suma <em>menos</em> de 1, justamente porque le falta
+  el LGN: un residual que sumara más que la entrada sería físicamente imposible.</li>
+  <li><strong>Mezcla a transporte</strong>: la composición mezclada de todos los residuales
+  + bypasses, ponderada por volumen, y el reparto de ese volumen entre MEGA, TTY y lo que
+  va directo a gasoducto (el bypass de la cascada).</li>
+</ul>
+<div class="warn"><span class="tag">⚠ Mezclar primero, calcular después</span>
+Si alguna vez hay que sacar una propiedad de una corriente mezclada, se calcula
+<strong>sobre la composición ya mezclada</strong>, no promediando la propiedad de cada
+corriente. Es la diferencia entre <code>SUMAPRODUCTO(volúmenes; composiciones)</code> → y
+recién ahí la cuenta, contra <code>PROMEDIO.PONDERADO(resultados)</code>: la primera está
+bien, la segunda no. Vale para cualquier magnitud que no sea lineal en la mezcla.</div>
+<div class="note"><span class="tag">Calidad de gas</span>
+Las versiones anteriores del modelo calculaban además el <strong>poder calorífico</strong>
+y el <strong>índice de Wobbe</strong> de cada corriente, y el tablero los graficaba contra
+sus máximos. <strong>Eso salió del modelo.</strong> La hoja <code>Propiedades</code> sigue
+siendo un input obligatorio, pero por los retenidos, no por la calidad.</div>
+
+<!-- ==================== 7 ==================== -->
+<h2 id="s7"><span class="num">7</span>Diagrama de la cascada</h2>
+<hr class="sec">
+
+<div class="diagram">
+  <p class="dtitle">El reparto del pool (escenario post-PM)</p>
+  <p class="dsub">Cada eslabón trata hasta su capacidad de evacuación de LGN y le pasa el sobrante al siguiente. Lo que ningún eslabón trata sale por bypass.</p>
+
+  <div class="stage">
+    <div class="slabel">TABLAS TOTALES → POOLS (Autofiltro por columna Gasoducto)</div>
+    <div class="chips">
+      <span class="n n-out">tabla_total_yacimientos</span>
+      <span class="n n-out">tabla_total_flujos_directos</span>
+      <span class="n n-out">tabla_total_hubs</span>
+      <span class="n n-mid" style="margin-left:14px">pool TTY (Gasoducto == "TTY")</span>
+      <span class="n n-mid">pool MEGA (Gasoducto == "MEGA")</span>
+    </div>
+  </div>
+
+  <div class="dArrow"><span class="glyph">▼</span><span class="albl">el pool TTY entra al primer eslabón; el pool MEGA entra directo a MEGA</span></div>
+
+  <div class="casc">
+    <div class="pnode" style="background:var(--out-bg);border-color:var(--out-bd);color:#5c3400">
+      <div class="pn-t">TTY - TBX</div>
+      <div class="pn-s">recibe el pool TTY</div>
+    </div>
+    <div class="parrow">
+      <span class="glyph">→</span>
+      <span class="albl">traspaso<br>(misma croma)</span>
+    </div>
+    <div class="pnode" style="background:var(--out-bg);border-color:var(--out-bd);color:#5c3400">
+      <div class="pn-t">TTY - Dew Point</div>
+      <div class="pn-s">mismo pool, mismo gas</div>
+    </div>
+    <div class="parrow">
+      <span class="glyph">→</span>
+      <span class="albl">derivación real<br>(se re-mezcla el pool)</span>
+    </div>
+    <div class="pnode" style="background:var(--out-bg);border-color:var(--out-bd);color:#5c3400">
+      <div class="pn-t">MEGA</div>
+      <div class="pn-s">+ su propio pool MEGA</div>
+    </div>
+  </div>
+
+  <div class="downrow">
+    <div class="dcol"><span class="glyph">↓</span>resto → bypass<br>+ LGN retenido</div>
+    <div class="dcol"><span class="glyph">↓</span>resto → bypass<br>+ LGN retenido</div>
+    <div class="dcol"><span class="glyph">↓</span>sobra → bypass<br>+ LGN retenido</div>
+  </div>
+
+  <div class="dArrow" style="margin-top:16px"><span class="glyph">▼</span><span class="albl">residuales + bypasses, ponderados por volumen</span></div>
+
+  <div class="stage">
+    <div class="chips">
+      <span class="n n-fin">mezcla a transporte (composición)</span>
+      <span class="n n-fin">LGN total (tn/d)</span>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><strong>Pre-PM:</strong>&nbsp;TBX fuera de servicio — el pool TTY entra directo a Dew Point y el resto de la cadena es igual.</span>
+  </div>
+</div>
+
+<details>
+<summary>Ver este diagrama como código Mermaid (para editarlo en mermaid.live o en la wiki)</summary>
+<pre><code>flowchart TB
+    subgraph Tablas_Totales
+        TTYC[tabla_total_yacimientos]
+        TTFD[tabla_total_flujos_directos]
+        TTH[tabla_total_hubs]
+    end
+    subgraph Pools
+        POOL_TTY[pool TTY - Autofiltro Gasoducto == TTY]
+        POOL_MEGA[pool MEGA - Autofiltro Gasoducto == MEGA]
+    end
+    subgraph Cascada_TTY[Tren TTY - mismo pool, dos plantas]
+        TBX[TTY - TBX]
+        DP[TTY - Dew Point]
+    end
+    MEGA_P[MEGA]
+    BYPASS[bypass a transporte]
+    LGN[LGN retenido tn/d]
+    MEZCLA[mezcla a transporte - composicion]
+    TTYC --&gt; POOL_TTY
+    TTFD --&gt; POOL_TTY
+    TTH --&gt; POOL_TTY
+    TTYC --&gt; POOL_MEGA
+    TTFD --&gt; POOL_MEGA
+    POOL_TTY --&gt; TBX
+    TBX -- "traspaso (misma croma)" --&gt; DP
+    TBX -- resto --&gt; BYPASS
+    DP -- "derivación real (se re-mezcla el pool)" --&gt; MEGA_P
+    DP -- resto --&gt; BYPASS
+    POOL_MEGA --&gt; MEGA_P
+    MEGA_P -- sobra --&gt; BYPASS
+    TBX --&gt; LGN
+    DP --&gt; LGN
+    MEGA_P --&gt; LGN
+    TBX --&gt; MEZCLA
+    DP --&gt; MEZCLA
+    MEGA_P --&gt; MEZCLA
+    BYPASS --&gt; MEZCLA
+    classDef input fill:#d4f4dd,stroke:#2e7d32,color:#000;
+    classDef pool fill:#e3f2fd,stroke:#1565c0,color:#000;
+    classDef planta fill:#FFB74D,color:#FFF,stroke:#FFA500;
+    classDef final fill:#0D0847,color:#FFF,stroke:#000;
+    class TTYC,TTFD,TTH input;
+    class POOL_TTY,POOL_MEGA pool;
+    class TBX,DP,MEGA_P planta;
+    class BYPASS,LGN,MEZCLA final;</code></pre>
+</details>
+
+<!-- ==================== 8 ==================== -->
+<h2 id="s8"><span class="num">8</span>Invariantes y validaciones</h2>
+<hr class="sec">
+
+<h3>El invariante central</h3>
+<p>Por cada eslabón de la cascada vale:</p>
+<pre><code>vol_disponible == vol_asignado + vol_derivado + bypass</code></pre>
+<p>Es la celda de control clásica: <code>=SI(A2&lt;&gt;B2+C2+D2;"⚠ NO CIERRA";"OK")</code>.
+El pipeline calcula el máximo desvío absoluto de este balance en toda la cascada
+(<code>desvio_balance</code>): es el número que dice si la física cierra.</p>
+
+<h3>Reportes del pipeline (valores típicos de una corrida real)</h3>
+<p>El pipeline imprime "celdas de control" por consola en cada etapa. Los mensajes típicos
+y su lectura:</p>
+<div class="tblwrap"><table>
+<tr><th>Mensaje típico</th><th>Lectura en Excel</th></tr>
+<tr><td><code>1 areas cargadas dos veces con cromatografias DISTINTAS</code></td><td><code>aguadadecastro</code> duplicada; el BUSCARV se queda con la primera</td></tr>
+<tr><td><code>0 premisas por ruta, 123 por clave</code></td><td>el BUSCARV por ruta nunca encuentra (columna de búsqueda vacía)</td></tr>
+<tr><td><code>3494 celdas sin volumen, se rellenan con 0</code></td><td>celdas vacías de la matriz de inyección; esperado</td></tr>
+<tr><td><code>19 areas sin destino en la matriz, 6 con volumen</code></td><td>filas con #N/A contra la matriz: gas que no llega a ningún destino</td></tr>
+<tr><td><code>N filas SIN cromatografia</code></td><td>N BUSCARV de croma dando #N/A: ese gas aporta volumen y <strong>cero LGN</strong></td></tr>
+<tr><td><code>matriz vs destino - sin volumen: [...]</code></td><td>orígenes declarados en la matriz que no aportan gas</td></tr>
+</table></div>
+<p>Un cambio en la <strong>cantidad de filas</strong> de cualquier cruce se avisa siempre:
+nunca es esperable (es como si un BUSCARV te duplicara filas — señal de clave repetida en
+la tabla de búsqueda).</p>
+
+
+<!-- ==================== 10 ==================== -->
+<h2 id="s10"><span class="num">10</span>El sandbox de plantas</h2>
+<hr class="sec">
+<p>El tab "Plantas (sandbox)" del dashboard corre su <strong>propia cascada</strong> sobre
+un registro editable de plantas, sin tocar el pipeline de producción. Es el equivalente de
+duplicar la hoja del modelo para probar un escenario sin romper la original: lo que se arme
+ahí no afecta a los otros tabs.</p>
+<p>Existe porque el pipeline actual está validado contra el Excel: cambiarlo para poder
+agregar plantas obligaría a revalidar todo de una. Con un tab aparte, el escenario nuevo se
+arma y se compara al lado del oficial.</p>
+
+<h3>Los seguros incorporados</h3>
+<ol>
+  <li><strong>El bloque de control es el primer número a mirar.</strong> Con el registro
+  sin tocar (las tres plantas base con los parámetros de la barra lateral), el resultado
+  del sandbox <strong>tiene que dar igual</strong> al tab "Reparto del gas". Es la celda de
+  control <code>=SI(sandbox&lt;&gt;oficial;"⚠";"OK")</code>: si da desvío sin haber editado
+  nada, hay un bug en la capa del sandbox y no hay que creerle a ningún escenario armado
+  encima.</li>
+  <li><strong>Aislamiento total.</strong> El sandbox trabaja sobre una <strong>copia</strong>
+  de los datos (nunca modifica los originales — la línea que separa a un sandbox de un
+  cambio) y siempre en MMm³/d estándar, independiente del selector de unidad. Además cada
+  tab está aislado: si uno explota, muestra su error adentro y los demás siguen
+  funcionando.</li>
+  <li><strong>Validación de configuraciones.</strong> Antes de correr, se validan los
+  escenarios. Los <strong>errores</strong> bloquean la corrida: destino inexistente, planta
+  conectada a sí misma, ciclo en la cascada, proporción negativa, planta sin fuente de gas,
+  planta sin retenidos cargados. Los <strong>avisos</strong> no bloquean: proporciones que
+  suman más de 100 % (se renormalizan), retenidos fuera de 0–1 (probablemente cargados en %
+  en vez de fracción — el clásico "70" donde iba "0,7").</li>
+</ol>
+
+<h3>Qué se puede armar adentro</h3>
+<p>El sandbox no es sólo "cambiar una capacidad y ver qué pasa". Tiene cuatro
+sub-paneles:</p>
+
+<p><strong>🤖 Asistente.</strong> Un flujo guiado que arma el escenario preguntando de a
+una cosa —qué querés agregar, de dónde sale el gas, con qué capacidad— y muestra el
+resumen <strong>antes</strong> de aplicar nada. Al confirmar, modifica el mismo registro
+que editarías a mano y dispara la corrida: no hay un segundo camino de ejecución. Es el
+atajo, porque armar una planta a mano son unas veinte interacciones.</p>
+
+<p><strong>Plantas.</strong> Un canvas donde se arrastra para mover, se conecta arrastrando
+de un nodo a otro y se hace click en una planta para editarla abajo. Debajo del canvas:
+crear plantas nuevas desde un preset, editar la retención por compuesto y las conexiones de
+salida (a qué destino va el sobrante, en qué proporción y con qué tope).</p>
+<div class="note"><span class="tag">La pregunta que decide todo</span>
+Al crear una planta hay que darle un <strong>nombre de pool</strong>. Si lo dejás igual al
+nombre, es un destino nuevo con su propio gas. Si ponés el de otra planta, son
+<strong>dos trenes sobre el mismo gas</strong> — el caso TBX / Dew Point de la sección 6.2.
+Es la misma distinción entre traspaso y derivación, pero elegida desde la pantalla.</div>
+<p>Sobre el reparto del sobrante entre varios destinos: si las proporciones suman menos
+de 1, esa fracción es bypass a propósito y <strong>no se redistribuye</strong> (es una
+decisión del operador: "de lo que sobre, mandá el 30 %"). En cambio, una rama que se satura
+por su tope sí libera volumen, que se reofrece a las ramas con lugar en proporción entre
+ellas — que es lo que haría un splitter real.</p>
+
+<p><strong>Gasoductos.</strong> Altas (un ducto nuevo de un área a una planta, con su
+volumen y su cromatografía) y bajas (sacar uno de servicio por mantenimiento). Las bajas se
+aplican antes que las altas.</p>
+<div class="warn"><span class="tag">⚠ El invariante de las intervenciones</span>
+<strong>El volumen que inyecta cada área no cambia nunca.</strong> Un ducto no crea ni
+destruye gas: sólo cambia por dónde sale. Toda intervención es una redistribución dentro
+del área, proporcional a como estaban los destinos — la regla de tres de siempre. Si el
+total inyectado cambiara, la diferencia que ves en las plantas ya no sería por el ducto
+sino por gas que apareció de la nada, y la comparación contra la corrida oficial dejaría de
+significar algo.<br><br>
+Caso sin salida: si un área inyecta <em>únicamente</em> al ducto que se da de baja, no hay
+a dónde mover su gas. No se inventa un destino — esas filas quedan como están y se
+reportan. Y como los ductos todavía no tienen capacidad máxima, una baja no genera bypass:
+mueve gas de un lado a otro.</div>
+
+<p><strong>Escenarios.</strong> Un escenario son <strong>las plantas y los gasoductos
+juntos en un solo <code>.json</code></strong>: es una pregunta completa ("¿qué pasa si abro
+un ducto desde tal área <em>y además</em> sumo un tren?"), y esa pregunta no se parte en dos
+archivos. Se puede cargar uno prearmado o subir uno propio.</p>
+<p>Al cargar, las dos mitades se comportan distinto y conviene saberlo: las
+<strong>plantas se mezclan por nombre</strong> sobre lo que ya tenés (un escenario con una
+sola planta no se lleva puestas las base), mientras que las <strong>intervenciones sobre
+ductos se reemplazan enteras</strong>, porque son una lista ordenada y no hay forma de
+identificar "la misma" intervención entre dos escenarios.</p>
+
+<h3>Correr el escenario</h3>
+<ul>
+  <li><strong>Resolver cascada</strong> — el período puntual. Muestra el reparto, los
+  esquemas y el <strong>impacto contra la corrida oficial</strong>: cuánto gas y cuánto LGN
+  ganó o perdió cada planta. Esa es la lectura que se busca al abrir o cerrar un ducto.</li>
+  <li><strong>Calcular serie del escenario</strong> — lo corre mes a mes con el rango de la
+  barra lateral y lo deja en <strong>Graphs</strong>, al lado de la serie oficial. Son N
+  corridas completas: tarda lo mismo que la serie oficial.</li>
+</ul>
+
+<h3>Checklist rápido de sanidad</h3>
+<ol>
+  <li>Abrir el tab sin tocar nada y dar <strong>"Resolver cascada"</strong>.</li>
+  <li>Verificar que el <strong>control dé cero</strong> contra "Reparto del gas".</li>
+  <li>Verificar que el desvío de balance sea despreciable.</li>
+  <li>Recién ahí, armar escenarios encima.</li>
+</ol>
+<p>También se puede <strong>descargar la simulación</strong>: un ZIP con la configuración
+(para volver a cargarla) y los resultados en CSV (para abrirlos en Excel), con un LEEME
+adentro que explica cada archivo.</p>
+
+<!-- ==================== 11 ==================== -->
+<h2 id="s11"><span class="num">11</span>Cómo correr el dashboard (Streamlit)</h2>
+<hr class="sec">
+
+<ol>
+  <li><strong>Barra lateral → "1. Datos de entrada"</strong>: subir el
+  <code>inputs.xlsx</code> (es opcional: sin archivo usa el default configurado en
+  <code>config.py</code>). Abajo muestra qué archivo está en uso.</li>
+  <li><strong>Completar los parámetros</strong> de las secciones 2 a 7 (período considerado
+  en formato MM-YYYY, fecha de PM, capacidades, topes). Están dentro de un formulario: los
+  cambios <strong>no se aplican hasta apretar el botón</strong> — es a propósito, para que
+  editar un campo no dispare una corrida sin querer.</li>
+  <li><strong>▶️ Ejecutar pipeline</strong>. Corre todo: preprocesamiento, tablas totales,
+  ruteo de hubs y cascada.</li>
+  <li>Navegar los tabs: <strong>Reparto del gas</strong> (los flujos por planta), los tabs
+  de cada planta (TTY - TBX, TTY - Dew Point, MEGA), <strong>Cascada</strong>,
+  <strong>Graphs</strong> (series temporales, reporte PDF y exportación de gráficos sueltos
+  para presentaciones), <strong>Tablas totales</strong> (con botones de descarga a CSV),
+  <strong>Mapa de la red</strong>, <strong>Plantas (sandbox)</strong>,
+  <strong>Diagnósticos</strong> (los reportes de la sección 8, sin tener que mirar la
+  consola) y <strong>💬 Asistente</strong> (sección 12).</li>
+  <li>Para la <strong>serie temporal</strong> hay que definir aparte un rango de meses y
+  correrla: es lo que alimenta a Graphs. Con la corrida puntual sola, ese tab avisa que
+  falta.</li>
+</ol>
+
+<!-- ==================== 12 ==================== -->
+<h2 id="s12"><span class="num">12</span>El asistente</h2>
+<hr class="sec">
+<p>Un tab pensado para quien <strong>no trabajó en el modelo</strong>: alguien que abre el
+tablero, ve un número raro y no sabe si es un problema, un dato sucio conocido o el
+comportamiento esperado. Son tres asistentes —documentación, resultados y sandbox— y cada
+uno funciona en <strong>dos capas</strong>.</p>
+
+<div class="tblwrap"><table>
+<tr><th></th><th>Capa base (siempre disponible)</th><th>Capa IA (opcional)</th></tr>
+<tr><td>📖 Documentación</td><td>buscador sobre los documentos + glosario</td><td>chat sobre los documentos</td></tr>
+<tr><td>📊 Resultados</td><td>explicador determinista de la corrida</td><td>chat sobre la corrida</td></tr>
+<tr><td>🛠️ Sandbox</td><td>guía paso a paso</td><td>agente que opera el sandbox</td></tr>
+</table></div>
+
+<p><strong>La capa base no usa red, ni credenciales, ni saca un solo dato del servidor.</strong>
+Es la que ve todo el mundo. La de arriba aparece sola si hay una credencial configurada;
+hasta entonces el tab avisa que existe y no molesta.</p>
+
+<h3>Por qué en dos capas y no un chat y listo</h3>
+<p>El buscador y el explicador son <strong>más confiables que un modelo</strong> para lo que
+más se pregunta ("qué es esto", "por qué da esto"): no alucinan, y las reglas las escribimos
+nosotros. El buscador, además, <strong>no genera texto</strong> — muestra los fragmentos
+reales de la documentación, así que no puede inventar. El modelo aporta en lo que ellos no
+pueden: reformular una pregunta mal planteada, cruzar dos documentos, operar el sandbox en
+lenguaje natural.</p>
+<p>Con las dos capas, el tablero sirve desde el día uno y habilitar la IA después es cambiar
+un secreto, no reescribir código.</p>
+
+<h3>El explicador, en términos de Excel</h3>
+<div class="excel"><span class="tag">EN EXCEL</span>
+Es la columna de celdas de control que uno pondría al costado del modelo:
+<code>=SI(ocupación&gt;95%;"⚠ planta saturada";"OK")</code>, una por situación, cada una con
+su umbral. Sólo que en vez de quedar escondidas en una hoja auxiliar, se muestran juntas y
+ordenadas por gravedad.</div>
+<p>Cada regla devuelve un hallazgo con su <strong>nivel</strong> (problema · atención · ok ·
+info), el detalle con los números a la vista y <strong>en qué tab mirarlo</strong>. Hoy
+cubre el balance, el estado de TBX, saturación y bypass por planta, las derivaciones, los
+hubs sin reparto y la calidad de los datos de entrada.</p>
+<p>Dos detalles de diseño que conviene no romper: los umbrales están <strong>todos juntos
+arriba del archivo</strong> y no desparramados por el código; y si una regla falla, se
+reporta esa y <strong>las demás siguen</strong>.</p>
+
+<h3>El agente sobre el sandbox</h3>
+<p>Cuando la capa de IA está encendida, el tercer asistente puede <em>operar</em> el
+sandbox: crear una planta, abrir un ducto, resolver la cascada. Tres reglas lo mantienen
+seguro:</p>
+<ul>
+  <li><strong>Opera el mismo estado que la pantalla.</strong> Lo que arma queda visible y
+  editable en el sandbox, y el botón <strong>Restablecer</strong> lo deshace. No hay un
+  camino de ejecución paralelo.</li>
+  <li><strong>Un fallo de herramienta es un mensaje, no una excepción.</strong> El modelo
+  recibe el error como texto, mira el estado y se corrige solo.</li>
+  <li>El bucle del agente <strong>corta a las 12 iteraciones</strong>.</li>
+</ul>
+
+<div class="warn"><span class="tag">⚠ Antes de encender la IA con datos reales</span>
+Las capas de chat y agente <strong>envían números de la corrida a un tercero</strong>. Hay
+que validarlo con seguridad de la información antes de usarlo con datos productivos: la
+política de la empresa manda sobre este documento. Si no se aprueba, la capa base queda
+como está y no se pierde nada.</div>
+
+<h3>Mantenerlo útil</h3>
+<p>Es la parte más barata de mejorar de todo el sistema, porque casi nada requiere tocar
+código:</p>
+<div class="tblwrap"><table>
+<tr><th>Si querés que el asistente…</th><th>Tocá…</th></tr>
+<tr><td>sepa de un tema nuevo</td><td>un documento nuevo (lo indexa solo)</td></tr>
+<tr><td>entienda cómo se dice algo en la jerga del proyecto</td><td>el glosario</td></tr>
+<tr><td>avise de una situación que se repite en las corridas</td><td>una regla del explicador</td></tr>
+<tr><td>pueda hacer algo nuevo en el sandbox</td><td>una herramienta del agente</td></tr>
+</table></div>
+<div class="note"><span class="tag">La contracara</span>
+Como el asistente <strong>lee la documentación</strong>, un documento mal escrito produce
+una respuesta mal fundada, y ahora con más alcance que antes. La calidad de la
+documentación es, desde acá, también la calidad del asistente.</div>
+
+</main>
+</div>
+</body>
+</html>

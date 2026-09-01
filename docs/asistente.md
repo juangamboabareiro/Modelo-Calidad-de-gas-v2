@@ -4,6 +4,9 @@ Tab del tablero pensado para gente **ajena al proyecto**. Tres asistentes, cada
 uno en **dos capas**: una que funciona siempre y otra que se enciende sola si
 hay credencial de IA.
 
+> El *por qué* de la arquitectura de dos capas está en `decisiones/0009`; acá
+> va el *cómo funciona* y el *cómo se enciende*.
+
 |  | sin credencial (siempre) | con credencial (extra) |
 |---|---|---|
 | 📖 Documentación | buscador de `docs/` + glosario | chat sobre los docs |
@@ -56,6 +59,11 @@ nivel (`problema`/`atencion`/`ok`/`info`), título, detalle con los números a l
 vista y **en qué tab mirarlo**. Hoy cubre: balance, estado de TBX, saturación y
 bypass por planta, derivaciones, PCS/IW de la mezcla contra los máximos, HUBs sin
 reparto y el panel de calidad de datos.
+
+> ⚠️ **A borrar.** La regla de PCS/IW, los términos `PCS` e `IW` del glosario y
+> `_CANDIDATOS_MAX` quedaron de cuando el modelo calculaba calidad de gas. Ya no
+> la calcula, así que esa regla no puede dar más que "sin datos": sacala. Ver
+> `decisiones/0008`.
 
 Los umbrales están todos juntos arriba del archivo. Agregar una regla es una
 función que reciba el contexto y devuelva `Hallazgo`s, sumada a `_REGLAS`; si una
@@ -178,3 +186,21 @@ corporativo o a un modelo local (Ollama), se toca ese archivo y nada más.
 - Situación que se repite en las corridas → hacela una regla del explicador.
 - Herramienta nueva para el agente → esquema en `ESQUEMAS` + método homónimo en
   `Ejecutor`.
+
+## Relación con el resto de la documentación
+
+El asistente **no es una fuente de verdad paralela**: lee `docs/`. Eso tiene
+dos consecuencias que conviene tener presentes.
+
+- Un documento mal escrito produce una respuesta mal fundada, y ahora con más
+  alcance que antes. La calidad de `dominio.md` y `linaje.md` es ahora también
+  la calidad del asistente.
+- Un documento nuevo mejora al asistente sin tocar código. Es la vía más barata
+  que hay para que el tablero explique algo que hoy no explica.
+
+| Si querés que el asistente… | Tocá… |
+|---|---|
+| sepa de un tema nuevo | un `.md` en `docs/` (lo indexa solo) |
+| entienda cómo se dice algo en la jerga del proyecto | el `GLOSARIO` |
+| avise de una situación que se repite en las corridas | una regla del explicador |
+| pueda hacer algo nuevo en el sandbox | un esquema en `ESQUEMAS` + su método en `Ejecutor` |

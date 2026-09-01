@@ -49,6 +49,8 @@ import re
 import pandas as pd
 import streamlit as st
 
+from ui.compat import ancho, dataframe as mostrar_df
+
 try:
     import altair as alt
 except ImportError:
@@ -200,7 +202,7 @@ def _g_inyeccion_tpe(mezcla: pd.DataFrame):
         .properties(height=340)
         .interactive()
     )
-    st.altair_chart(grafico, use_container_width=True)
+    st.altair_chart(grafico, **ancho())
 
 
 def _g_calidad_mezcla(mezcla: pd.DataFrame):
@@ -249,7 +251,7 @@ def _g_calidad_mezcla(mezcla: pd.DataFrame):
         grafico = grafico + _regla_maximo(pcs_max, "PCS MAX")
     if iw_max > 0:
         grafico = grafico + _regla_maximo(iw_max, "IW MAX")
-    st.altair_chart(grafico.interactive(), use_container_width=True)
+    st.altair_chart(grafico.interactive(), **ancho())
 
 
 def _leer_prhc_externo(archivo) -> pd.DataFrame | None:
@@ -322,7 +324,7 @@ def _g_prhc(mezcla: pd.DataFrame):
     df["serie"] = "Mezcla con salida de plantas"
     grafico = _lineas(df, "serie", "valor", "°C", fmt=",.1f")
     grafico = grafico + _regla_maximo(limite, f"Límite PRHC {limite:g}°C")
-    st.altair_chart(grafico, use_container_width=True)
+    st.altair_chart(grafico, **ancho())
 
     excesos = df[df["valor"] > limite]
     if len(excesos):
@@ -357,7 +359,7 @@ def _g_inyeccion(areas: pd.DataFrame):
 
     apilado = _top_n_mas_otros(df, "area", "volumen", top_n)
     st.altair_chart(_area_apilada(apilado, "area", "volumen", "MMm3/d"),
-                    use_container_width=True)
+                    **ancho())
 
 
 def _g_detalle_gasoducto(areas: pd.DataFrame):
@@ -379,7 +381,7 @@ def _g_detalle_gasoducto(areas: pd.DataFrame):
     apilado = _top_n_mas_otros(df[df["gasoducto"] == gasoducto],
                                "area", "volumen", top_n=10)
     st.altair_chart(_area_apilada(apilado, "area", "volumen", "MMm3/d"),
-                    use_container_width=True)
+                    **ancho())
 
 
 def _g_calidad_gasoducto(areas: pd.DataFrame):
@@ -407,7 +409,7 @@ def _g_calidad_gasoducto(areas: pd.DataFrame):
     st.altair_chart(
         _lineas(pond[pond["gasoducto"].isin(sel)].rename(columns={"gasoducto": "serie"}),
                 "serie", "valor", "PCS [kcal/m3]"),
-        use_container_width=True)
+        **ancho())
 
 
 # ===========================================================================
@@ -439,7 +441,7 @@ def _g_ingreso_planta(pool: pd.DataFrame):
         return
     apilado = _top_n_mas_otros(df, "area", col_val, top_n=10)
     st.altair_chart(_area_apilada(apilado, "area", col_val, "MMm3/d"),
-                    use_container_width=True)
+                    **ancho())
 
 
 def _g_procesado_bp(plantas_df: pd.DataFrame):
@@ -464,7 +466,7 @@ def _g_procesado_bp(plantas_df: pd.DataFrame):
         st.info("Sin volúmenes para graficar.")
         return
     st.altair_chart(_area_apilada(largo, "serie", "valor", "MMm3/d"),
-                    use_container_width=True)
+                    **ancho())
 
 
 def _g_retenidos(plantas_df: pd.DataFrame):
@@ -486,7 +488,7 @@ def _g_retenidos(plantas_df: pd.DataFrame):
 
     st.altair_chart(
         _area_apilada(largo, "serie", "valor", "tn/d", fmt=",.1f", altura=320),
-        use_container_width=True)
+        **ancho())
 
 
 def _g_pcs_iw(plantas_df: pd.DataFrame):
@@ -524,7 +526,7 @@ def _g_pcs_iw(plantas_df: pd.DataFrame):
         grafico = _lineas(largo, "serie", "valor", f"{titulo} [kcal/m3]")
         if maximo and maximo > 0:
             grafico = grafico + _regla_maximo(maximo, f"{titulo} MAX")
-        st.altair_chart(grafico, use_container_width=True)
+        st.altair_chart(grafico, **ancho())
 
     izq, der = st.columns(2)
     with izq:
@@ -570,7 +572,7 @@ def _g_caudal_capacidad(plantas_df: pd.DataFrame):
         )
         capas = area + linea
     st.altair_chart(capas.properties(height=320).interactive(),
-                    use_container_width=True)
+                    **ancho())
 
 
 # ===========================================================================
@@ -622,7 +624,7 @@ def _tabla_resumen_anual(plantas_df: pd.DataFrame):
     ).T
     vista.columns = crudo.columns
 
-    st.dataframe(vista, use_container_width=True)
+    mostrar_df(vista)
     _descargar_csv(crudo.reset_index(names="Métrica"), "resumen_anual",
                    key="dl_resumen_anual")
 
@@ -655,7 +657,7 @@ def _sin_serie(resultados: dict):
                     rv[corte], errors="coerce").fillna(0).sum())
         filas.append(fila)
     if filas:
-        st.dataframe(pd.DataFrame(filas), use_container_width=True)
+        mostrar_df(pd.DataFrame(filas))
 
 
 # ===========================================================================
@@ -870,7 +872,7 @@ def panel_graphs(resultados: dict, serie: dict | None = None,
                 # resiembra (si no, el editor arrastra filas de la selección
                 # anterior).
                 tabla = st.data_editor(
-                    semilla, hide_index=True, use_container_width=True,
+                    semilla, hide_index=True, **ancho(),
                     key=f"exp_editor_{abs(hash(tuple(sel))) % 99991}",
                     column_config={
                         "Gráfico": st.column_config.TextColumn(disabled=True),

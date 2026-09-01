@@ -1,10 +1,45 @@
 # Hallazgos
 
-Cosas que aparecieron al escribir los tests y correr el pipeline contra
-`inputs.xlsx` (período 01-2025). Ordenadas por impacto.
+Problemas conocidos de datos y configuración, encontrados al escribir los tests
+y correr el pipeline contra `inputs.xlsx` (período 01-2025). Ordenados por
+impacto.
 
-Cada una dice **qué se observó**, **cómo verificarlo** y **qué habría que
-decidir**. No toqué código de producción: son para que decidas vos.
+Cada uno dice **qué se observó**, **cómo verificarlo** y **qué habría que
+decidir**. Ninguno tocó código de producción: son para decidir, no arreglos ya
+hechos.
+
+> **Antes de reportar algo raro, buscalo acá.** La mitad de las sorpresas de
+> este modelo ya están documentadas, con su verificación y su alcance real.
+
+## Índice
+
+| # | Qué | Severidad | Estado |
+|---|---|---|---|
+| [0](#hallazgo-0--configpy-define-max_derivacion_tty_tbx_a_tty_dp-dos-veces-y-la-segunda-multiplica-de-más) | `config.py` multiplica un tope dos veces por el factor | alta (latente) | Abierto |
+| [1](#hallazgo-1--el-73-del-volumen-de-total-flujos-directos-no-tiene-cromatografía) | 73% de flujos directos sin cromatografía | alta | Abierto · 1 XFAIL |
+| [2](#hallazgo-2--diecisiete-filas-con-volumen-inyectado-negativo-y-el-pool-de-mega-se-come-1371) | 17 filas con volumen negativo | alta | Abierto · 2 XFAIL |
+| [3](#hallazgo-3--los-datos-actuales-no-ejercitan-la-cascada) | Los datos reales no ejercitan la cascada | media | Mitigado con escenarios forzados |
+| [4](#hallazgo-4--los-pools-son-chicos-comparados-con-las-capacidades) | Factor 1000 sin confirmar | a confirmar | Abierto |
+| [5](#hallazgo-5--la-búsqueda-de-cromatografía-por-ruta-nunca-matchea) | La búsqueda por ruta nunca matchea | baja | Abierto (rama muerta) |
+| [6](#hallazgo-6--dos-implementaciones-paralelas-de-la-cascada) | Dos implementaciones de la cascada | alta (estructural) | Abierto · contenido por test |
+| [Menores](#menores) | 7 a 14 | varias | Varios abiertos |
+
+## Cómo se usa este documento
+
+- **Un hallazgo se cierra, no se borra.** Cuando se resuelve, se cambia el
+  estado a `RESUELTO`, con fecha y commit, y se deja el texto. El histórico es
+  la mitad del valor: explica por qué el código tiene la forma que tiene.
+- **Los XFAIL apuntan acá.** Los tests marcados `xfail` llevan un `reason` que
+  nombra el hallazgo. No los borres: el xfail no estricto avisa solo el día que
+  el dato de origen se corrige.
+- **Un hallazgo que se decide y no se arregla** se convierte en un ADR
+  (`decisiones/`), y acá queda el puntero.
+
+> ⚠️ **Pendiente de revisión (v2).** Estos hallazgos se relevaron antes del
+> ruteo por HUB. Al menos el 1, el 2 y el 3 hay que **volver a medirlos**: el
+> ruteo cambia de qué tabla sale el gas de cada pool, así que los porcentajes y
+> los volúmenes citados pueden haberse movido. Los mecanismos siguen valiendo;
+> los números, verificalos.
 
 ---
 
@@ -260,3 +295,23 @@ está en el repo** — si existe en otro lado, conviene recuperarlo.
 | 12 | `datos/alias_areas.csv` no está en el repo. `cargar_alias` devuelve `{}` y sigue, pero entonces la tabla de alias no está haciendo nada. | `io_/loaders.py` |
 | 13 | `outputs/*.csv.csv` — doble extensión, y son outputs versionados. | `outputs/` |
 | 14 | `Sufijos-Planta` se lee sin encabezado real: la primera fila de datos (`Fortin de Piedra-VMS`, `Otra`) quedó como nombre de columna. `cargar_sufijos_planta` lo maneja, pero es frágil. | hoja del Excel |
+
+---
+
+## Candidatos a hallazgo nuevo (v2, sin verificar)
+
+Cosas que el ruteo por HUB pone sobre la mesa y que todavía nadie midió.
+Cuando se verifiquen, pasan arriba con su número.
+
+- **Hubs que usan mezcla volumétrica en vez de premisa cargada.** ¿Cuántos son
+  y cuánto volumen mueven? Un hub grande sin croma cargada es una aproximación
+  significativa hecha en silencio (avisa por consola, pero nadie lee la
+  consola). Sale del informe del ruteo: `hubs_con_mezcla`.
+- **Hubs sin reparto utilizable.** Sus áreas siguen inyectando directo. Es el
+  comportamiento viejo, deliberado, pero conviene saber a cuántas áreas afecta.
+- **Efecto del ruteo sobre HALLAZGO-2.** El pool de MEGA incluía −1.371 de
+  volumen negativo. Si parte de ese gas ahora entra por un hub, la mezcla del
+  hub se calcula con volúmenes negativos pesando con su signo. Vale la pena
+  mirar qué composición sale de esos hubs.
+- **`Cromas-HUBs` sin fila de encabezado o con la clave en otra columna.** El
+  loader tolera `HUB` o `Area`, pero no una tercera variante.

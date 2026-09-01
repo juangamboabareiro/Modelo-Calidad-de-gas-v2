@@ -5,6 +5,10 @@
 
 El *qué significa* está en `dominio.md`; acá va el *dónde está*.
 
+⚠️ **Este archivo es anterior a v2**: no incluye el ruteo por HUB, el asistente,
+los escenarios ni el canvas. Regeneralo antes de usarlo como referencia:
+`python tools/mapa_modulos.py --escribir`.
+
 ## Árbol
 
 ```

@@ -21,6 +21,8 @@ import unicodedata
 import pandas as pd
 import streamlit as st
 
+from ui.compat import ancho, dataframe as mostrar_df
+
 
 # ===========================================================================
 # Helpers
@@ -205,11 +207,11 @@ def _vista_tabla(nombre: str, df: pd.DataFrame, key: str):
     )
 
     if transponer:
-        st.dataframe(vista.T, use_container_width=True, height=460)
+        mostrar_df(vista.T, height=460)
     else:
         st.dataframe(
             vista.style.format(precision=int(decimales), thousands=","),
-            use_container_width=True, height=460,
+            height=460, **ancho(),
         )
 
     _descargar_csv(filtrada, _slug(nombre), key=f"dl_{key}")
@@ -259,7 +261,7 @@ def comparar_con_excel(df_calc: pd.DataFrame, nombre_tabla: str, key: str):
 
     df_ref = df_ref.dropna(axis=1, how="all").dropna(axis=0, how="all")
     with st.expander(f"Ver hoja '{hoja}' cruda ({len(df_ref):,} filas)"):
-        st.dataframe(df_ref, use_container_width=True, height=280)
+        mostrar_df(df_ref, height=280)
 
     k1, k2 = st.columns(2)
     with k1:
@@ -380,7 +382,7 @@ def comparar_con_excel(df_calc: pd.DataFrame, nombre_tabla: str, key: str):
             .reset_index()
         )
         st.markdown("**Columnas con más diferencias**")
-        st.dataframe(peores, use_container_width=True)
+        mostrar_df(peores)
 
     mostrar = (fuera if solo_dif else dif).sort_values(
         "dif_%", ascending=False, na_position="last"
@@ -390,7 +392,7 @@ def comparar_con_excel(df_calc: pd.DataFrame, nombre_tabla: str, key: str):
             "calculado": "{:,.4f}", "excel": "{:,.4f}",
             "diferencia": "{:,.4f}", "dif_%": "{:,.2f}",
         }),
-        use_container_width=True, height=420,
+        height=420, **ancho(),
     )
     _descargar_csv(
         dif, f"diff_{_slug(nombre_tabla)}", key=f"dldiff_{key}",
@@ -429,9 +431,9 @@ def panel_tablas(resultados: dict):
         nombres = list(registro.keys())
         with s1:
             n_a = st.selectbox("Izquierda", nombres, key="lado_a")
-            st.dataframe(registro[n_a], use_container_width=True, height=420)
+            mostrar_df(registro[n_a], height=420)
         with s2:
             n_b = st.selectbox(
                 "Derecha", nombres, index=min(1, len(nombres) - 1), key="lado_b"
             )
-            st.dataframe(registro[n_b], use_container_width=True, height=420)
+            mostrar_df(registro[n_b], height=420)

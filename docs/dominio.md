@@ -3,7 +3,7 @@
 Qué modela el sistema y qué significan los números. **Este documento no habla
 de Python**: debería sobrevivir a un rewrite completo del código. Si buscás
 dónde está algo, ver `mapa.md`; si buscás de qué celda del Excel sale un dato,
-ver `linaje.md`.
+ver `linaje.md`; si buscás por qué algo se decidió así, ver `decisiones/`.
 
 ---
 
@@ -21,6 +21,11 @@ un período mensual dado, el modelo responde:
 La entrada es la inyección de cada área productiva (yacimientos, hubs y flujos
 directos a gasoducto) con su cromatografía. La salida son los flujos por planta
 y las tablas totales por origen.
+
+**Lo que el modelo no hace** (importante para no pedirle lo que no puede dar):
+no rutea el gas residual hacia los gasoductos de evacuación, no modela la
+capacidad de esos ductos, y no calcula fuel gas. La cascada termina en
+tratado / derivado / bypass y ahí se corta.
 
 ## 2. La cascada
 
@@ -53,7 +58,7 @@ De ahí sale la distinción más importante del modelo:
 Confundirlos es el error clásico: aplicar mezcla en TBX→DP es mezclar el gas
 consigo mismo y corrompe la cromatografía de DP. El gas derivado de DP a MEGA
 sale **sin tratar**, así que viaja con la cromatografía de *entrada* de DP, no
-con la del residual.
+con la del residual. Ver `decisiones/0003`.
 
 ### 2.2 "Llenarse" = agotar la evacuación de LGN
 
@@ -83,6 +88,10 @@ vol_disponible = vol_asignado + vol_derivado + bypass
 Como el `vol_derivado` de un eslabón es el `vol_disponible` del siguiente, la
 cadena entera cierra sin doble conteo. Si este invariante se rompe, el
 resultado no es confiable — no hay excepción.
+
+Consecuencia práctica que se malinterpreta seguido: **las columnas no se suman
+entre plantas.** El derivado de una ya está contado como disponible de la
+siguiente.
 
 Caso borde con sentido físico: si una planta no retiene nada
 (`lgn_unitario ≤ 0`), no tiene restricción de líquido y su `vol_maximo` es
@@ -124,22 +133,59 @@ fecha TBX está **fuera de servicio**: no trata nada, no produce LGN, y sus
 topes de traspaso **se ignoran** (el tren no existe, el gas pasa de largo), así
 que el pool TTY entero cae en DP.
 
+### 2.6 Ampliaciones
+
+Una ampliación es un **Δ de capacidad con fecha de vigencia**: se suma a la
+capacidad base (evacuación en tn/d, ingreso en MMm³/d) desde ese mes inclusive.
+Se pueden cargar varias. En una serie temporal se activan solas mes a mes, así
+que la curva refleja el plan de expansión sin correr un escenario por etapa.
+
 ## 3. El pool de una planta
 
 El gas de una planta son todas las filas cuyo destino (`Gasoducto`) es su
-`nombre_pool`, sumando **dos fuentes**:
+`nombre_pool`, sumando **tres fuentes**:
 
 1. **Vía gasoducto** — flujos directos que declaran ese destino.
-2. **Inyección directa** — áreas que inyectan directo a la planta (caso MEGA y
-   TBX El Portón; TTY no las tiene porque VMN y VMS son gasoductos).
+2. **Inyección directa** — áreas sin hub que inyectan directo a la planta (caso
+   MEGA y TBX El Portón; TTY no las tiene porque VMN y VMS son gasoductos).
+3. **Vía HUB** — el gas de las áreas con hub, ya mezclado y repartido por el
+   hub (§3.1).
 
 más, cuando corresponde, las **derivaciones** de otras plantas y las
 cromatografías cargadas a mano en un escenario. Cada fila lleva la traza de su
-origen (`flujos_directos` / `yacimientos` / `derivacion`).
+origen (`flujos_directos` / `yacimientos` / `hubs` / `derivacion`).
 
 Dos plantas con el mismo `nombre_pool` son dos trenes sobre el mismo gas — es
 la relación TBX / Dew Point, y lo que permite sumar un tercer tren sin tocar
 nada.
+
+### 3.1 Ruteo por HUB
+
+**Un área con HUB asignado no inyecta directo a la planta.** Su gas entra al
+hub, el hub lo mezcla y lo reparte entre las plantas. Las áreas sin hub y las
+rutas hacia gasoductos no se tocan: el hub solo intermedia la entrega a
+plantas.
+
+La composición con la que el hub entrega, en orden de preferencia:
+
+1. la **premisa cargada** para ese hub (input explícito);
+2. si no está, la **mezcla volumétrica** de las áreas que le aportan, con
+   aviso.
+
+El reparto entre plantas sale de los renglones-hub del detalle de HUBs y se usa
+como **proporción, no como volumen absoluto**: así el balance cierra en cada
+período aunque la hoja traiga volúmenes cargados en otro momento.
+
+**Por qué importa.** Si un hub reparte entre varios destinos, cada planta debe
+recibir la composición *del hub*, no la de cada área por separado, y el reparto
+es una decisión del hub, no de cada área. El caso de control es un hub que
+manda el 100% a una sola planta y cuya composición es la mezcla volumétrica:
+ahí el gas de entrada no cambia, porque la mezcla es lineal. Ver
+`decisiones/0006`.
+
+**Regla de seguridad.** Un hub sin renglón de reparto utilizable deja a sus
+áreas inyectando directo, como antes, con aviso. Mantener el comportamiento
+viejo para un hub puntual es preferible a perder su volumen en silencio.
 
 ## 4. Cromatografía
 
@@ -156,7 +202,7 @@ El caso testigo del sufijo es **Fortín de Piedra**: una medición para el gas
 que va por planta (CO Paralelo, NEUII, GPM → sufijo `Planta`) y otra para el
 que no (VMS, YPF-RDM, MEGA → sufijo `Otra`). Sin la desambiguación, elegir una
 al azar le sacaba **34,7% del C3+** al pool de MEGA alimentado por áreas.
-Sufijos válidos hoy: `Otra`, `Planta`, `TBX`.
+Sufijos válidos hoy: `Otra`, `Planta`, `TBX`. Ver `decisiones/0001`.
 
 Una fila con volumen y **sin** cromatografía es un error silencioso grave:
 aporta gas y cero LGN, o sea que baja el `lgn_unitario` del pool e infla el
@@ -175,19 +221,30 @@ El **gas residual** (lo que sale de la planta) suma *menos* de 1: es lo que
 queda después de retener LGN. Un residual que sume más que la entrada es
 físicamente imposible.
 
-### 4.3 Propiedades calculadas
+Cuando hace falta una propiedad física del residual, la composición se
+**renormaliza a 1** antes de calcularla: los moles retenidos ya no están en esa
+corriente. Las fracciones que se muestran salen del vector original, sin
+renormalizar — son dos usos distintos del mismo dato y conviene no mezclarlos.
 
-De la composición y las propiedades por compuesto se derivan, por fila:
+### 4.3 La hoja de propiedades por compuesto
 
-| Propiedad | Qué es |
-|---|---|
-| `z` | factor de compresibilidad: `1 − P·(x·b)²` |
-| `densidad` | relativa al aire |
-| `PCS` | poder calorífico superior |
-| `IW` | índice de Wobbe: `PCS / √densidad` |
+El modelo **no calcula calidad de gas**: no hay poder calorífico ni índice de
+Wobbe entre sus salidas. Ver `decisiones/0008`.
 
-Con las constantes operativas: presión base, temperatura base, constante de
-gas, conversión (vienen del Excel) y densidad del aire 1.225 kg/m³.
+Pero la tabla de propiedades por compuesto **sigue siendo un input
+obligatorio**, porque el cálculo de retenidos usa el peso molecular y el factor
+de compresibilidad para pasar de fracción molar a toneladas por día. Sacar esa
+hoja del Excel rompe el modelo aunque no se reporte ninguna calidad.
+
+Junto con ella se usan las constantes operativas: presión base, temperatura
+base, constante de gas y conversión (vienen del Excel), más la densidad del
+aire, 1.225 kg/m³.
+
+> **Una regla que conviene no perder.** Si alguna vez hace falta una propiedad
+> de una corriente **mezclada**, se calcula sobre la composición ya mezclada, no
+> promediando la propiedad de las corrientes. Vale para cualquier magnitud que
+> no sea lineal en la mezcla — el índice de Wobbe era el caso testigo, con la
+> raíz de la densidad en el denominador.
 
 ## 5. Unidades — fuente frecuente de bugs
 
@@ -203,10 +260,15 @@ Tres escalas conviven y **ninguna conversión salta sola si está mal**:
 Regla práctica: antes de escribir una fórmula, chequear en qué escala está cada
 operando. El error típico (cargar `25` pensando en MMm³/d donde va `25000`)
 estrangula la planta **sin dar ningún error** — o al revés, un factor de más
-vuelve un tope infinito (ya pasó: HALLAZGOS.md, HALLAZGO-0).
+vuelve un tope infinito (ya pasó: HALLAZGO-0).
 
 > El factor 1000 está marcado como *a confirmar* en el propio config
 > (HALLAZGO-4).
+
+Aparte de las tres escalas internas, en pantalla conviven dos formas de mostrar
+un volumen: **estándar** y **equivalente a 9.300 kcal/m³**. Es solo
+presentación —el modelo trabaja siempre en estándar— pero un número comparado
+contra otro en distinta base no significa nada.
 
 ## 6. Inyección: de la serie temporal al período
 
@@ -217,29 +279,57 @@ Aguas arriba de la cascada:
 2. Se promedia por año y se cruza con el mapeo área → HUB.
 3. La matriz origen × destino reparte la inyección de cada área entre
    gasoductos/plantas, con coeficientes por `(Area, Gasoducto)` y mes.
-4. Se elige el **período considerado** y se arman las tres tablas totales:
+4. Se elige el **período considerado** y se arman las tablas totales:
    yacimientos (inyección primaria), flujos directos y detalles de HUBs.
+5. Se aplica el **ruteo por HUB** (§3.1), que mueve parte del volumen de
+   yacimientos a una tabla de hub → planta.
 
 Meses: 1-4 y 11-12 son *verano*, 5-9 *invierno*. El 10 no está clasificado
 (pendiente de decisión).
 
-## 7. Preguntas abiertas del dominio
+## 7. Escenarios: qué se puede preguntar y qué significa la respuesta
+
+El sandbox responde preguntas contrafácticas sobre la misma inyección. Las
+reglas del dominio que aplican:
+
+**Intervenciones sobre gasoductos.** Un ducto no crea ni destruye gas: solo
+cambia por dónde sale. Por eso **el volumen que inyecta cada área no cambia
+nunca** — toda alta o baja es una redistribución dentro del área, proporcional
+a como estaban los destinos. Ese invariante es lo que hace que la comparación
+contra la corrida oficial signifique algo: si cambiara el total inyectado, la
+diferencia en las plantas ya no sería por el ducto sino por gas que apareció.
+
+Caso sin salida: si un área inyecta *únicamente* al ducto que se da de baja, no
+hay a dónde mover su gas. No se inventa un destino: esas filas quedan como
+están y se reportan.
+
+Hoy los ductos **no tienen capacidad máxima**, así que una baja no genera
+bypass: mueve gas de un lado a otro. Cuando se modele la capacidad, esto
+cambia, y ahí las bajas empiezan a tener consecuencias interesantes.
+
+**Plantas nuevas.** Una planta nueva se define por de dónde saca el gas: pool
+propio alimentado por un ducto nuevo, otro tren sobre el pool de una planta
+existente (mismo gas, cromatografía idéntica), receptora del sobrante de otra
+(mezcla), o una corriente propia cargada a mano.
+
+## 8. Preguntas abiertas del dominio
 
 Cosas que el modelo todavía no resuelve (detalle en `HALLAZGOS.md`):
 
 - **Cromatografía de orígenes que no son áreas.** `tty`, `mega`, `bdp`, `vmliq`
   aparecen como origen de flujos directos, pero su composición no puede salir
   de la hoja de premisas: sería el gas residual de esa planta, lo que crea una
-  dependencia circular con la cascada.
+  dependencia circular con la cascada. (HALLAZGO-1)
 - **Volúmenes negativos.** 17 filas; los grandes (`gpm → GPM: −29.483`)
   sugieren gas que *sale* del nodo modelado con signo, no un error de carga.
-  Hay que decidir la semántica.
+  Hay que decidir la semántica. (HALLAZGO-2)
 - **Restricción de capacidad de gasoductos** y lógica de evacuación del gas
   residual: anotado como TODO desde el inicio de la migración.
 - **TBX El Portón y VM LIQ**: destinos reales con retenidos ya cargados, sin
   planta modelada.
+- **Mes 10** sin estación asignada (§6).
 
-## 8. Glosario
+## 9. Glosario
 
 | Término | Significado |
 |---|---|
@@ -249,13 +339,18 @@ Cosas que el modelo todavía no resuelve (detalle en `HALLAZGOS.md`):
 | **DP / Dew Point** | Tren de punto de rocío |
 | **MEGA** | Planta con pool propio de otra composición |
 | **PM** | Parada de mantenimiento; su fecha marca el ingreso en servicio de TBX |
+| **Ampliación** | Δ de capacidad con fecha de vigencia, que se suma a la base |
 | **Pool** | Gas disponible para un tren, con una cromatografía dada |
 | **Traspaso** | Pasar volumen entre trenes del mismo pool (sin mezcla) |
 | **Derivación** | Pasar gas a un pool de otra composición (con mezcla) |
 | **Bypass** | Gas que no se trata en ninguna planta |
-| **Evacuación** | Capacidad de sacar el LGN producido (tn/d). La restricción activa. |
+| **Bypass estructural** | El que se produce porque las proporciones suman < 1 |
+| **Evacuación** | Capacidad de sacar el LGN producido (tn/d). La restricción activa |
 | **Cromatografía** | Composición molar del gas por compuesto |
 | **RTP** | Retenido en planta: fracción de cada compuesto que queda como líquido |
 | **Sufijo** | Discriminante (`Otra`/`Planta`/`TBX`) para áreas con dos cromatografías |
-| **HUB** | Punto de agregación de áreas |
+| **HUB** | Punto de agregación de áreas, que mezcla y reparte hacia plantas |
+| **Ruteo por HUB** | Que el gas de un área con hub entre por el hub y no directo |
 | **9300** | Base calorífica de referencia (kcal/m³) de la inyección cruda |
+| **Escenario** | Plantas + intervenciones sobre ductos, guardado como una unidad |
+| **Control del sandbox** | Que el sandbox sin tocar dé igual que la corrida oficial |
