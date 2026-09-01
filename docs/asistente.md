@@ -4,28 +4,34 @@ Tab del tablero pensado para gente **ajena al proyecto**. Tres asistentes, cada
 uno en **dos capas**: una que funciona siempre y otra que se enciende sola si
 hay credencial de IA.
 
-|  | sin credencial (siempre) | con credencial (extra) |
-|---|---|---|
-| 📖 Documentación | buscador de `docs/` + glosario | chat sobre los docs |
-| 📊 Resultados | explicador determinista de la corrida | chat sobre la corrida |
-| 🛠️ Sandbox | guía paso a paso | agente que opera el sandbox |
+| Dónde | Qué | sin credencial (siempre) | con credencial (extra) |
+|---|---|---|---|
+| **Burbuja 💬** | 📖 Documentación | buscador de `docs/` + glosario | chat sobre los docs |
+| **Tab Asistente** | 📊 Resultados | explicador determinista de la corrida | chat sobre la corrida |
+| **Tab Asistente** | 🛠️ Sandbox | guía paso a paso | agente que opera el sandbox |
 
 **La capa de abajo no usa red, ni key, ni saca un solo dato del servidor.** Es
 la que ve todo el mundo. La de arriba aparece si existe `ANTHROPIC_API_KEY`;
 hasta entonces el tab avisa que existe y no molesta.
 
-## Dos presentaciones, un solo cuerpo
+## El reparto: burbuja vs tab
 
-El mismo asistente se muestra de dos formas:
+- **La burbuja 💬**, arriba a la derecha: **sólo documentación**, glosario y
+  buscador. Disponible en todo momento, haya corrida o no.
+- **El tab Asistente**: **resultados y sandbox**. Sólo existe después de correr
+  el pipeline, porque los tabs no se dibujan antes.
 
-- **La burbuja 💬** arriba a la derecha, disponible en todo momento —haya
-  corrida o no— sin salir de lo que estás mirando. Es la entrada principal.
-- **El tab Asistente**, para cuando querés leer con espacio. Sólo existe
-  después de correr el pipeline, porque los tabs no se dibujan antes.
+El criterio es el momento de uso. La documentación se consulta en cualquier
+momento y de a ratos cortos ("¿qué era el bypass?"), y no depende de que haya
+corrida: es exactamente lo que tiene que estar a un click desde cualquier
+pantalla. Los otros dos necesitan una corrida y se leen con espacio.
 
-Antes de la corrida la burbuja muestra **sólo la pestaña de ayuda**: sin
-resultados, "Corrida" y "Sandbox" no tienen nada que decir, y pestañas vacías
-son peores que ninguna.
+Y hace que la burbuja sea **barata**: no toca el explicador ni el resumen de la
+corrida, por eso se puede dibujar arriba de todo sin costo.
+
+Los tres cuerpos igual viven juntos en `ui/tab_asistente.py`
+(`cuerpo_documentacion`, `cuerpo_resultados`, `cuerpo_sandbox`), reutilizables,
+para que no haya dos versiones que se desincronicen.
 
 Para que no se desincronicen, la lógica vive en `cuerpo_documentacion`,
 `cuerpo_resultados` y `cuerpo_sandbox` (`ui/tab_asistente.py`) y cada
@@ -55,6 +61,30 @@ a un expander.
 
 Dentro del modal la entrada de texto es un `text_input` + botón, **no**
 `st.chat_input`: ese widget tiene restricciones sobre dónde puede vivir.
+
+### Por qué abre rápido
+
+Son dos costos distintos y conviene no confundirlos:
+
+- **Abrir** el modal es un rerun de app: Streamlit vuelve a correr el script
+  entero. Como va mandando los elementos a medida que los produce, dibujar la
+  burbuja **arriba de todo** hace que el modal aparezca enseguida y el resto de
+  la página se siga armando abajo. Cuando estaba al final del script había que
+  esperar a que se rehicieran los tabs, el graphviz, el mapa y las tablas.
+- **Interactuar dentro** del modal no es un rerun de app: `st.dialog` hereda el
+  comportamiento de `st.fragment`, así que escribir en el buscador sólo vuelve
+  a correr la función del diálogo. Eso ya venía gratis.
+
+> ⚠️ **No envolver la burbuja en `st.fragment`** para acelerar la apertura.
+> Anidar un diálogo dentro de un fragment tiene bugs conocidos: modales que no
+> cierran, contenido que desaparece al interactuar. El patrón que usa el
+> módulo —llamar al diálogo detrás del `if st.button(...)`— es el que
+> recomienda la documentación de Streamlit.
+
+Además, `_docs_crudos()` (la documentación concatenada para el contexto de la
+IA) está cacheada: la burbuja se dibuja en todos los reruns, y leer la carpeta
+entera cada vez se nota. El botón de reindexar limpia ese caché y el del
+índice.
 
 ## Por qué híbrido
 
@@ -150,15 +180,13 @@ with tab_asistente:
     _render_seguro("Asistente", panel_asistente, resultados_fisicos, PARAMS,
                    serie=st.session_state.get("serie"), factor_mm=FACTOR_MM)
 
-# 2. La burbuja — al FINAL del script y FUERA de todo `with tab:`
-asistente_flotante(resultados_fisicos, PARAMS,
-                   serie=st.session_state.get("serie"), factor_mm=FACTOR_MM)
+# 2. La burbuja — lo más ARRIBA posible, una sola vez, sin argumentos
+asistente_flotante()
 ```
 
-La burbuja se llama **dos veces** en `app.py`: una antes del `st.stop()` de la
-pantalla de bienvenida y otra al final del script. Nunca corren las dos en la
-misma ejecución (el `st.stop()` corta), así que no hay choque de claves de
-widget.
+La burbuja se llama **una sola vez y lo más arriba posible**, antes de los tabs
+y antes del `st.stop()` de la bienvenida. Así funciona en las dos pantallas con
+un único punto de llamada, y abre rápido (ver abajo).
 
 La pantalla previa a la corrida es `ui/bienvenida.py`: la guía de uso, el aviso
 de las unidades y el del botón. **No lleva asistente embebido** — para eso está

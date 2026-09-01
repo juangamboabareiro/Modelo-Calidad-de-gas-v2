@@ -1882,6 +1882,22 @@ def construir_vista_9300(resultados: dict):
     return vista, avisos
 
 
+# ---------------------------------------------------------------------------
+# La burbuja de ayuda (arriba a la derecha).
+# ---------------------------------------------------------------------------
+# Va ACÁ ARRIBA, antes de los tabs y antes del `st.stop()` de la bienvenida, por
+# dos razones. La primera es que así hay UN solo punto de llamada y funciona en
+# las dos pantallas. La segunda es velocidad: abrir el modal es un rerun de app,
+# y Streamlit va mandando los elementos a medida que los produce — dibujada
+# arriba, la ayuda aparece enseguida y el resto de la página se sigue armando
+# abajo. Al final del script, en cambio, había que esperar a que se rehicieran
+# todos los tabs.
+try:
+    asistente_flotante()
+except Exception as _e:  # noqa: BLE001 - la ayuda nunca tumba el tablero
+    st.caption(f"(La ayuda flotante falló: {type(_e).__name__}: {_e})")
+
+
 resultados = st.session_state.get("resultados")
 
 if resultados is None:
@@ -1889,14 +1905,6 @@ if resultados is None:
     # embebido acá: vive en la burbuja, que está en esta pantalla igual que en
     # el resto. Una sola entrada a la ayuda, en el mismo lugar siempre.
     panel_bienvenida()
-
-    # La burbuja también antes del `st.stop()`. El `try` es a mano porque
-    # `_render_seguro` se define más abajo en el script; la regla es la misma:
-    # un fallo del asistente no puede dejar esta pantalla en blanco.
-    try:
-        asistente_flotante(None, PARAMS, serie=None, factor_mm=FACTOR_MM)
-    except Exception as _e:  # noqa: BLE001
-        st.caption(f"(La ayuda flotante falló: {type(_e).__name__}: {_e})")
 
     st.stop()
 
@@ -2102,17 +2110,3 @@ for _tab, _nombre in ((tab_tbx, "TTY - TBX"), (tab_dp, "TTY - Dew Point"),
                       (tab_mega, "MEGA")):
     with _tab:
         _render_seguro(_nombre, _mostrar_planta_contenido, _nombre, plantas[_nombre])
-
-
-# ---------------------------------------------------------------------------
-# La burbuja de ayuda, abajo a la derecha.
-# ---------------------------------------------------------------------------
-# Va al FINAL y FUERA de todo `with tab:`: es un elemento de la página, no de
-# un tab. Aislada como los tabs — si el asistente falla, el tablero no se
-# entera.
-try:
-    asistente_flotante(resultados_fisicos, PARAMS,
-                       serie=st.session_state.get("serie"),
-                       factor_mm=FACTOR_MM)
-except Exception as _e:  # noqa: BLE001
-    st.caption(f"(La ayuda flotante falló: {type(_e).__name__}: {_e})")

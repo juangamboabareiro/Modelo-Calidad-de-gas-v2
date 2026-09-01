@@ -1,67 +1,63 @@
 """
-El asistente como burbuja flotante (arriba a la derecha).
-=========================================================
+La burbuja de ayuda (arriba a la derecha): glosario y buscador.
+===============================================================
 
-El mismo asistente que el tab, pero disponible SIEMPRE, sin tener que
-abandonar lo que estabas mirando. Es la forma en que la gente espera encontrar
-la ayuda de una aplicacion web: una burbuja que sigue ahi mientras mirás los
-números.
+Es la ayuda de vocabulario: "¿qué es el bypass?", "¿qué quiere decir que el
+balance no cierra?". Nada mas. La lectura de la corrida y la guia del sandbox
+viven en el tab Asistente, porque necesitan una corrida y se leen con espacio.
 
-Como esta hecho, y por que asi
-------------------------------
-Streamlit no tiene widgets flotantes. Las dos piezas:
+Esa division no es solo de gusto: es lo que hace que la burbuja sea BARATA.
+No depende de `resultados`, ni del explicador, ni del resumen de la corrida, y
+por eso se puede dibujar antes que todo lo demas.
 
-1. **El disparador** es un `st.button` normal, metido en un
-   `st.container(key=...)`. Desde Streamlit 1.39 esa `key` se traduce en una
-   clase CSS `st-key-<key>` en el DOM, que es el hook OFICIAL para estilar
-   (tanto que `stylable_container` de streamlit-extras quedo deprecado a favor
-   suyo). Con eso, el CSS que fija la burbuja apunta a UNA clase estable en
-   vez de a los nombres internos de Streamlit, que cambian entre versiones.
+POR QUE ABRE RAPIDO
+-------------------
+Hay dos costos distintos y conviene no confundirlos:
 
-2. **El panel** es un `st.dialog`, que es modal de verdad y lo maneja
-   Streamlit. La alternativa —dibujar el panel entero flotando con CSS— obliga
-   a pelear con el layout en cada version y se rompe en pantallas chicas.
+  - Abrir el modal es un rerun de APP: Streamlit vuelve a correr el script
+    entero. Si la burbuja se dibuja al final, el modal recien aparece despues
+    de rehacer los tabs, el graphviz, el mapa y las tablas. **Por eso se llama
+    ARRIBA DE TODO en `app.py`**: Streamlit va mandando los elementos a medida
+    que los produce, asi que el modal se ve enseguida y el resto de la pagina
+    se sigue dibujando abajo.
 
-O sea: de todo el asistente, lo unico que depende de CSS es la POSICION de un
-boton. Si algun dia ese CSS deja de aplicar, el boton aparece en su lugar
-normal del flujo y todo lo demas sigue funcionando. Es la degradacion mas
-barata posible.
+  - Interactuar DENTRO del modal no es un rerun de app: `st.dialog` hereda el
+    comportamiento de `st.fragment`, asi que escribir en el buscador solo
+    vuelve a correr la funcion del dialogo. Eso ya venia gratis.
 
-3. **La entrada de texto** dentro del modal NO es `st.chat_input`: ese widget
-   tiene restricciones de donde puede vivir. Se usa un `text_input` + boton,
-   que se comporta igual y no depende de esa lista.
+Lo que NO hay que hacer es envolver la burbuja en `st.fragment` para acelerar
+la apertura: anidar un dialogo dentro de un fragment tiene bugs conocidos
+(modales que no cierran, contenido que desaparece al interactuar). La
+documentacion de Streamlit recomienda justamente el patron de abajo — el
+dialogo se llama detras de la interaccion con el boton, no dentro de otro
+fragment.
 
-Uso en app.py — UNA linea, y va afuera de los tabs:
+Uso en app.py — UNA linea, lo mas ARRIBA posible:
 
     from ui.asistente_popup import asistente_flotante
-    asistente_flotante(resultados_fisicos, PARAMS,
-                       serie=st.session_state.get("serie"))
+    asistente_flotante()
 """
 
 from __future__ import annotations
 
 import streamlit as st
 
-from ui.tab_asistente import (
-    cuerpo_documentacion, cuerpo_resultados, cuerpo_sandbox,
-    contexto_ia, ia_disponible,
-)
+from ui.tab_asistente import cuerpo_documentacion, docs_para_ia, ia_disponible
 
-CLAVE_ABIERTO = "asistente_popup_abierto"
 CLAVE_BOTON = "asistente_burbuja"
 
-# Alto fijo del cuerpo del modal. Sin esto, el panel cambia de tamaño en cada
-# respuesta y el boton de enviar se te escapa hacia abajo mientras escribis.
-ALTO_CUERPO = 420
+# Alto fijo del cuerpo. Sin esto, el panel cambia de tamaño con cada busqueda y
+# el contenido salta mientras lo estas leyendo.
+ALTO_CUERPO = 440
 
 # `top` esquiva la barra propia de Streamlit (el menu y el boton de deploy
 # viven en la esquina superior derecha, ~3.75rem de alto). Si algun dia la
 # burbuja se superpone con ese menu, este es el numero a subir.
 _CSS = """
 <style>
-/* La burbuja. `.st-key-asistente_burbuja` es la clase que Streamlit genera a
-   partir de la key del container (>= 1.39). Si esta regla no aplica, el boton
-   simplemente queda en su lugar del flujo: nada se rompe. */
+/* `.st-key-asistente_burbuja` es la clase que Streamlit genera a partir de la
+   key del container (>= 1.39). Si esta regla no aplica, el boton queda en su
+   lugar del flujo: nada se rompe. */
 .st-key-%(key)s {
     position: fixed;
     right: 1.5rem;
@@ -74,7 +70,6 @@ _CSS = """
     padding: 0.6rem 1.1rem;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
 }
-/* En pantallas chicas se pega mas al borde para no comerse el ancho util. */
 @media (max-width: 640px) {
     .st-key-%(key)s { right: 0.6rem; top: 3.6rem; }
 }
@@ -82,78 +77,50 @@ _CSS = """
 """ % {"key": CLAVE_BOTON}
 
 
-def _abrir():
-    st.session_state[CLAVE_ABIERTO] = True
+def asistente_flotante():
+    """Dibuja la burbuja; si la tocan, abre el modal en ESTE mismo run.
 
-
-def asistente_flotante(resultados: dict | None, params=None,
-                       serie: dict | None = None, factor_mm: float = 1000.0):
-    """Dibuja la burbuja y, si esta abierta, el modal del asistente.
-
-    Se puede llamar desde cualquier punto del script, incluso ANTES del
-    `st.stop()` de la pantalla de bienvenida: el asistente no necesita que haya
-    corrida para servir.
+    Se puede llamar desde cualquier punto del script, incluso antes del
+    `st.stop()` de la pantalla de bienvenida: no necesita corrida. Pero cuanto
+    mas arriba, antes aparece el modal.
     """
     st.markdown(_CSS, unsafe_allow_html=True)
 
     with st.container(key=CLAVE_BOTON):
-        st.button("💬 Ayuda", key="btn_abrir_asistente", on_click=_abrir,
-                  help="Buscador de documentación, glosario y lectura de la "
-                       "corrida. Está disponible siempre, haya corrida o no.")
+        abrir = st.button(
+            "💬 Ayuda", key="btn_abrir_asistente",
+            help="Glosario y buscador sobre la documentación. Disponible "
+                 "siempre, haya corrida o no.")
 
-    if not st.session_state.get(CLAVE_ABIERTO):
+    if not abrir:
         return
 
-    # `st.dialog` es GA desde Streamlit 1.37. Si la version es mas vieja, en
-    # vez de reventar se cae a un expander: fea pero funcional.
+    # El patron recomendado por la documentacion: el dialogo se llama detras de
+    # la interaccion, no de una bandera en session_state. Con una bandera
+    # haria falta apagarla a mano para que el modal no se reabra solo despues
+    # de cerrarlo con la X.
     dialogo = getattr(st, "dialog", None)
     if dialogo is None:
-        with st.expander("💬 Asistente", expanded=True):
-            _cuerpo(resultados, params, serie, factor_mm)
-            if st.button("Cerrar", key="btn_cerrar_asistente_exp"):
-                st.session_state[CLAVE_ABIERTO] = False
-                st.rerun()
+        # Streamlit < 1.37: sin modal. Feo pero funcional.
+        with st.expander("💬 Ayuda", expanded=True):
+            _cuerpo()
         return
 
-    @dialogo("💬 Asistente", width="large")
+    @dialogo("💬 Ayuda", width="large")
     def _modal():
-        _cuerpo(resultados, params, serie, factor_mm)
+        _cuerpo()
 
-    # Al cerrar el modal con la X, Streamlit rerunea y la clave sigue en True,
-    # asi que el modal volveria a abrirse solo. Se apaga ACA, apenas se dibuja:
-    # el modal ya quedo en pantalla para este run, y el siguiente arranca
-    # cerrado salvo que el usuario vuelva a apretar la burbuja.
-    st.session_state[CLAVE_ABIERTO] = False
     _modal()
 
 
-def _cuerpo(resultados, params, serie, factor_mm):
-    """El contenido del panel: los mismos tres asistentes que el tab."""
-    docs, resumen = contexto_ia(resultados, serie, factor_mm)
-
-    # Sin corrida, "Corrida" y "Sandbox" no tienen nada que decir: se muestra
-    # solo la ayuda. Mostrar pestañas vacías es peor que no mostrarlas.
-    if not resultados:
-        with st.container(height=ALTO_CUERPO, border=False):
-            cuerpo_documentacion(docs, sufijo="pop")
-        st.caption("Cuando corras el pipeline aparecen acá la lectura de la "
-                   "corrida y la guía del sandbox.")
-        return
-
-    tab_docs, tab_res, tab_sb = st.tabs(["📖 Ayuda", "📊 Corrida", "🛠️ Sandbox"])
-
-    with tab_docs:
-        with st.container(height=ALTO_CUERPO, border=False):
-            cuerpo_documentacion(docs, sufijo="pop")
-
-    with tab_res:
-        with st.container(height=ALTO_CUERPO, border=False):
-            cuerpo_resultados(resultados, params, serie, docs, resumen,
-                              sufijo="pop")
-
-    with tab_sb:
-        with st.container(height=ALTO_CUERPO, border=False):
-            cuerpo_sandbox(resultados, docs, resumen, factor_mm, sufijo="pop")
+def _cuerpo():
+    """Glosario y buscador, con el chat de documentación plegado abajo."""
+    with st.container(height=ALTO_CUERPO, border=False):
+        cuerpo_documentacion(docs_para_ia(), sufijo="pop")
 
     if not ia_disponible():
-        st.caption("Modo local: sin conexión ni credenciales.")
+        st.caption("Modo local: sin conexión ni credenciales. Para leer la "
+                   "corrida o armar escenarios, mirá el tab **Asistente**.")
+    else:
+        st.caption("Para leer la corrida o armar escenarios, mirá el tab "
+                   "**Asistente**.")
