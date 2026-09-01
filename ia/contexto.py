@@ -165,6 +165,20 @@ def resumen_resultados(resultados: dict | None, factor_mm: float = 1000.0,
 # ===========================================================================
 # System prompts
 # ===========================================================================
+#
+# El `system` que se manda a la API NO es un string sino una lista de bloques,
+# ordenados de mas estable a mas volatil:
+#
+#   [0] documentacion            <- cache_control: identico en los tres bots
+#   [1] instrucciones del bot    <- corto, cambia por bot
+#   [2] resultados de la corrida <- cambia en cada corrida
+#
+# El corte del cache va al final del bloque 0 y NO mas adelante. La regla es
+# que el cache solo pega si el prefijo hasta el corte es identico entre
+# llamadas: si el corte estuviera despues de los resultados, cada corrida
+# nueva escribiria una entrada y no leeria ninguna. Con el corte donde esta,
+# la documentacion se paga entera una vez y despues se lee a 1/10 del precio,
+# aunque cambien la corrida y la pregunta.
 
 _BASE = """Sos el asistente del tablero de modelado de la red de gas \
 (migracion del Excel de inyeccion/plantas a Python + Streamlit). Tu publico \
@@ -177,36 +191,24 @@ Reglas duras:
 - Respondes SOLO con lo que esta en tu contexto. Si algo no esta, decilo \
 ("eso no figura en la documentacion / en la corrida actual") en vez de inventar.
 - Cita la fuente cuando ayude: "segun docs/linaje.md...".
-- Se conciso: parrafos cortos, sin listas eternas."""
+- Se conciso: parrafos cortos, sin listas eternas.
+- El tablero tiene ademas un buscador y un explicador que NO usan IA. Si la \
+respuesta esta ahi, decilo: "eso lo tenes en el buscador / en la lectura \
+automatica de la corrida"."""
 
-SYSTEM_DOCS = _BASE + """
+_ROL_DOCS = """Tu material es la documentacion del proyecto (bloque anterior). \
+Responde preguntas sobre como funciona el modelo, que significa cada termino y \
+por que se tomo cada decision."""
 
-Tu material es la documentacion del proyecto, que va a continuacion.
+_ROL_RESULTADOS = """Ademas de la documentacion tenes los RESULTADOS de la \
+corrida vigente. Cuando el usuario pregunte "por que" un numero da lo que da, \
+razona con las reglas del modelo (documentacion) sobre los numeros de la \
+corrida. Declara siempre las unidades."""
 
-<documentacion>
-{docs}
-</documentacion>"""
-
-SYSTEM_RESULTADOS = _BASE + """
-
-Ademas de la documentacion tenes los RESULTADOS de la corrida vigente del \
-tablero. Cuando el usuario pregunte "por que" un numero da lo que da, razona \
-con las reglas del modelo (docs) sobre los numeros de la corrida (resultados). \
-Declara siempre las unidades.
-
-<documentacion>
-{docs}
-</documentacion>
-
-<resultados>
-{resultados}
-</resultados>"""
-
-SYSTEM_AGENTE = _BASE + """
-
-Sos ademas el OPERADOR del tab "Plantas (sandbox)": podes armar escenarios y \
-correr la cascada usando herramientas. El sandbox es independiente del \
-tablero oficial: nada de lo que hagas toca la corrida de produccion.
+_ROL_AGENTE = """Sos ademas el OPERADOR del tab "Plantas (sandbox)": podes \
+armar escenarios y correr la cascada usando herramientas. El sandbox es \
+independiente del tablero oficial: nada de lo que hagas toca la corrida de \
+produccion.
 
 Como trabajar:
 1. Antes de tocar nada, mira el estado con `ver_registro` / `ver_planta`.
@@ -216,12 +218,31 @@ Deja siempre claro en tu respuesta en que unidad estas hablando.
 esperaba. Ajusta y reintenta (maximo 2 reintentos por herramienta).
 4. Despues de modificar el escenario, corre `resolver_cascada` y resume el \
 resultado comparando contra la corrida oficial si esta disponible.
-5. NUNCA digas que hiciste algo que una herramienta no confirmo.
+5. NUNCA digas que hiciste algo que una herramienta no confirmo."""
 
-<documentacion>
-{docs}
-</documentacion>
+ROLES = {"docs": _ROL_DOCS, "resultados": _ROL_RESULTADOS, "agente": _ROL_AGENTE}
 
-<resultados_oficiales>
-{resultados}
-</resultados_oficiales>"""
+
+def bloques_system(tipo: str, docs: str, resultados: str = "") -> list[dict]:
+    """Arma el `system` en bloques para la API. `tipo` in ROLES.
+
+    El bloque de documentacion va PRIMERO y es identico para los tres bots, asi
+    que comparten la misma entrada de cache (el agente escribe la suya porque
+    ademas manda `tools`, que en el prefijo van antes que `system`).
+    """
+    bloques = [{
+        "type": "text",
+        "text": f"<documentacion>\n{docs}\n</documentacion>",
+        "cache_control": {"type": "ephemeral"},
+    }]
+
+    bloques.append({"type": "text", "text": _BASE + "\n\n" + ROLES[tipo]})
+
+    if resultados:
+        etiqueta = "resultados_oficiales" if tipo == "agente" else "resultados"
+        bloques.append({
+            "type": "text",
+            "text": f"<{etiqueta}>\n{resultados}\n</{etiqueta}>",
+        })
+
+    return bloques

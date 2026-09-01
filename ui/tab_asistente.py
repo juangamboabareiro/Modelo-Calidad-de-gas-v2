@@ -50,11 +50,9 @@ from ia.explicador import explicar, PREGUNTAS
 try:
     from ia.cliente import (
         stream_texto, completar, hay_credencial, modelo_configurado, SinAPIKey,
+        leer_uso, resumen_uso,
     )
-    from ia.contexto import (
-        cargar_docs, resumen_resultados,
-        SYSTEM_DOCS, SYSTEM_RESULTADOS, SYSTEM_AGENTE,
-    )
+    from ia.contexto import cargar_docs, resumen_resultados, bloques_system
     from ia.herramientas import ESQUEMAS, Ejecutor
     IA_IMPORTABLE = True
     ERROR_IA = ""
@@ -227,9 +225,11 @@ def _chat_simple(clave: str, system: str, placeholder: str):
         st.markdown(pregunta)
 
     with st.chat_message("assistant"):
+        uso: dict = {}
         try:
             respuesta = st.write_stream(
-                stream_texto(system, _mensajes_para_api(historia)))
+                stream_texto(system, _mensajes_para_api(historia),
+                             registro_uso=uso))
         except SinAPIKey:
             historia.pop()
             st.warning("Se perdió la credencial: revisá `secrets.toml`.")
@@ -239,6 +239,12 @@ def _chat_simple(clave: str, system: str, placeholder: str):
             st.error(f"La llamada a la API falló: {type(e).__name__}: {e}")
             return
 
+        # El consumo va como caption bajo la respuesta: es la unica forma de
+        # notar que el caching esta funcionando (la segunda pregunta tiene que
+        # mostrar "desde cache" y un costo ~10x menor que la primera).
+        if uso:
+            st.caption(resumen_uso(uso))
+
     historia.append({"role": "assistant", "content": str(respuesta)})
 
 
@@ -247,10 +253,18 @@ def _extraer_texto(respuesta) -> str:
                      if getattr(b, "type", "") == "text").strip()
 
 
-def _correr_agente(system, mensajes, ejecutor, log) -> str:
-    """messages -> (tool_use -> ejecutar -> tool_result)* -> texto final."""
+def _correr_agente(system, mensajes, ejecutor, log, uso_total: dict) -> str:
+    """messages -> (tool_use -> ejecutar -> tool_result)* -> texto final.
+
+    `uso_total` acumula el consumo de TODAS las iteraciones: un pedido del
+    agente son varias llamadas a la API, no una, y mostrar solo la ultima
+    subestimaria el costo real del turno.
+    """
     for _ in range(MAX_ITERACIONES_AGENTE):
         respuesta = completar(system, mensajes, tools=ESQUEMAS)
+
+        for clave, valor in leer_uso(getattr(respuesta, "usage", None)).items():
+            uso_total[clave] = uso_total.get(clave, 0) + valor
 
         if respuesta.stop_reason != "tool_use":
             return _extraer_texto(respuesta) or "(el modelo no devolvió texto)"
@@ -300,7 +314,7 @@ def _chat_agente(resultados, docs, resumen, factor_mm):
     ejecutor = Ejecutor(comunes=comunes,
                         flujos_oficiales=resultados.get("flujos_plantas"),
                         factor_mm=factor_mm)
-    system = SYSTEM_AGENTE.format(docs=docs, resultados=resumen)
+    system = bloques_system("agente", docs, resumen)
 
     historia = _historia("agente")
     _dibujar_historia(historia)
@@ -317,15 +331,19 @@ def _chat_agente(resultados, docs, resumen, factor_mm):
 
     with st.chat_message("assistant"):
         log = st.container()
+        uso_total: dict = {}
         try:
             with st.spinner("Trabajando en el sandbox…"):
                 final = _correr_agente(
-                    system, _mensajes_para_api(historia), ejecutor, log)
+                    system, _mensajes_para_api(historia), ejecutor, log,
+                    uso_total)
         except Exception as e:  # noqa: BLE001
             historia.pop()
             st.error(f"El agente falló: {type(e).__name__}: {e}")
             return
         st.markdown(final)
+        if uso_total:
+            st.caption(resumen_uso(uso_total) + " · suma de todas las llamadas")
 
     historia.append({"role": "assistant", "content": final})
 
@@ -392,7 +410,7 @@ def panel_asistente(resultados: dict | None, params=None,
         if hay_ia:
             _con_ia("Preguntale a la IA sobre la documentación", "docs",
                     lambda: _chat_simple(
-                        "docs", SYSTEM_DOCS.format(docs=docs),
+                        "docs", bloques_system("docs", docs),
                         "p. ej.: «¿qué es la cascada del pool de gas?»"))
         else:
             _aviso_ia_apagada()
@@ -403,8 +421,7 @@ def panel_asistente(resultados: dict | None, params=None,
         if hay_ia:
             _con_ia("Preguntale a la IA sobre esta corrida", "resultados",
                     lambda: _chat_simple(
-                        "resultados",
-                        SYSTEM_RESULTADOS.format(docs=docs, resultados=resumen),
+                        "resultados", bloques_system("resultados", docs, resumen),
                         "p. ej.: «¿por qué MEGA tiene sobrante este período?»"))
         else:
             _aviso_ia_apagada()

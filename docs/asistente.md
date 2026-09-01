@@ -99,21 +99,71 @@ Sin nada más que eso, el tab ya funciona completo en modo sin IA.
 ## Encender la IA (opcional)
 
 1. `anthropic` en `requirements.txt`.
-2. `.streamlit/secrets.toml`:
+2. `.streamlit/secrets.toml` (que va en `.gitignore`, no al repo):
 
    ```toml
    ANTHROPIC_API_KEY = "sk-ant-..."
-   ASISTENTE_MODELO = "claude-sonnet-5"   # opcional
+   ASISTENTE_MODELO = "claude-sonnet-5"   # opcional, es el default
    ```
+
+3. Verificalo sin levantar la app:
+
+   ```bash
+   export ANTHROPIC_API_KEY=sk-ant-...
+   python tools/probar_asistente.py
+   ```
+
+   Hace dos preguntas iguales y confirma que la segunda lee del caché. Sirve
+   para separar "la credencial está mal" de "el tab tiene un bug".
+
+### El modelo: Sonnet 5
+
+`claude-sonnet-5` es el default. Tres cosas de este modelo que el código ya
+respeta y conviene no romper:
+
+- **No setear `temperature`, `top_p` ni `top_k`** a valores no-default: devuelve
+  400. El cliente no los toca.
+- **No usar extended thinking manual**: también devuelve 400. El thinking
+  adaptativo viene activado solo.
+- Contexto de 1M tokens, así que la documentación entra holgada aunque crezca.
+
+### Prompt caching
+
+El asistente manda los docs enteros en cada pregunta. Para que eso no se pague
+completo todas las veces, el `system` va en **bloques** ordenados de estable a
+volátil, con el corte del caché al final de la documentación:
+
+```
+[0] <documentacion>      ← cache_control, idéntico en los tres bots
+[1] instrucciones del bot
+[2] <resultados>         ← cambia en cada corrida
+```
+
+El corte va ahí y no más adelante a propósito: el caché sólo pega si el prefijo
+hasta el corte es idéntico entre llamadas. Si estuviera después de los
+resultados, cada corrida escribiría una entrada nueva y no leería ninguna.
+
+Con Sonnet 5: mínimo cacheable 1.024 tokens (los docs lo superan de sobra),
+escritura 1,25× y **lectura 0,1×** del input base. En la práctica, la primera
+pregunta paga los docs completos y las siguientes pagan una décima parte,
+mientras se pregunte con menos de 5 minutos de diferencia (esa es la vida del
+caché, y cada uso la renueva).
+
+Bajo cada respuesta la UI muestra los tokens y el costo estimado. **Es la forma
+de verificar que el caching anda**: la segunda pregunta seguida tiene que decir
+"desde caché". Los precios están en `PRECIOS` (`ia/cliente.py`) y son sólo para
+ese cartelito — la fuente de verdad es la consola de Anthropic. Si cambiás de
+modelo, actualizalos o el número miente.
 
 Antes de hacerlo con datos reales: **los bots 2 y 3 envían números de la corrida
 a un tercero.** Validarlo con seguridad de la información; la política de la
 empresa manda sobre este documento. Si no se aprueba, la capa sin IA queda como
 está y no se pierde nada.
 
-Costo aproximado con Sonnet: centavos por pregunta (cada una manda los docs y,
-en los bots 2/3, el resumen de la corrida). Si crece el volumen, mirar prompt
-caching.
+Costo aproximado con Sonnet 5 ($2/MTok de entrada, $10/MTok de salida): del
+orden de centavos por pregunta, y bastante menos con el caché caliente. Un turno
+del agente son varias llamadas, no una, así que cuesta más que una pregunta
+suelta; el cartelito bajo su respuesta suma todas.
 
 ### Cambiar de proveedor
 
