@@ -100,6 +100,7 @@ from ui.tab_plantas import panel_tab_plantas
 from ui.tab_graphs import panel_graphs
 from ui.tab_asistente import panel_asistente
 from ui.asistente_popup import asistente_flotante
+from ui.bienvenida import panel_bienvenida
 from ui.correccion_editor import bloque_correccion
 
 
@@ -1884,23 +1885,18 @@ def construir_vista_9300(resultados: dict):
 resultados = st.session_state.get("resultados")
 
 if resultados is None:
-    st.info("Elegí los parámetros en la barra lateral y apretá **Ejecutar pipeline**.")
+    # Pre-ejecución: la guía de uso, y nada más. El asistente NO se dibuja
+    # embebido acá: vive en la burbuja, que está en esta pantalla igual que en
+    # el resto. Una sola entrada a la ayuda, en el mismo lugar siempre.
+    panel_bienvenida()
 
-    # El asistente va ANTES del `st.stop()` a propósito: es justo el momento en
-    # que más se lo necesita. Alguien que abre el tablero por primera vez todavía
-    # no sabe qué es "el pipeline" ni qué va a ver después, y si el asistente
-    # viviera solo entre los tabs no lo encontraría nunca. Acá el buscador y el
-    # glosario ya funcionan (no dependen de la corrida) y el explicador dice
-    # simplemente que todavía no hay nada que leer.
-    #
-    # `_render_seguro` se define más abajo en el script, así que este aislamiento
-    # se escribe a mano: la regla es la misma, un fallo del asistente no puede
-    # dejar la pantalla de bienvenida en blanco.
-    st.divider()
+    # La burbuja también antes del `st.stop()`. El `try` es a mano porque
+    # `_render_seguro` se define más abajo en el script; la regla es la misma:
+    # un fallo del asistente no puede dejar esta pantalla en blanco.
     try:
-        panel_asistente(None, PARAMS, serie=None, factor_mm=FACTOR_MM)
-    except Exception as _e:  # noqa: BLE001 - el asistente nunca tumba la app
-        st.error(f"El asistente falló: {type(_e).__name__}: {_e}")
+        asistente_flotante(None, PARAMS, serie=None, factor_mm=FACTOR_MM)
+    except Exception as _e:  # noqa: BLE001
+        st.caption(f"(La ayuda flotante falló: {type(_e).__name__}: {_e})")
 
     st.stop()
 
@@ -1946,10 +1942,12 @@ with tab_resumen:
     ):
         mostrar_diagnostico(_obs)
 
+    # Sin cartel cuando cierra: que el balance cierre es la expectativa, no una
+    # novedad, y un verde permanente entrena a ignorar los mensajes de esta
+    # zona. El desvío sigue estando en el explicador del asistente para quien
+    # lo quiera confirmar.
     desvio = resultados["desvio_balance"]
-    if desvio < 1e-6:
-        st.success(f"Balance por eslabón cerrado (desvío máx. {desvio:.2e}).")
-    else:
+    if desvio >= 1e-6:
         st.error(
             f"El balance por eslabón no cierra: desvío máx. {desvio:,.4f}. "
             "Debería valer `vol_disponible = vol_asignado + vol_derivado + bypass`."

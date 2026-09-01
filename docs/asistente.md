@@ -18,9 +18,14 @@ hasta entonces el tab avisa que existe y no molesta.
 
 El mismo asistente se muestra de dos formas:
 
-- **La burbuja 💬** abajo a la derecha, disponible en todo momento sin salir de
-  lo que estás mirando. Es la entrada principal.
-- **El tab Asistente**, para cuando querés leer con espacio.
+- **La burbuja 💬** arriba a la derecha, disponible en todo momento —haya
+  corrida o no— sin salir de lo que estás mirando. Es la entrada principal.
+- **El tab Asistente**, para cuando querés leer con espacio. Sólo existe
+  después de correr el pipeline, porque los tabs no se dibujan antes.
+
+Antes de la corrida la burbuja muestra **sólo la pestaña de ayuda**: sin
+resultados, "Corrida" y "Sandbox" no tienen nada que decir, y pestañas vacías
+son peores que ninguna.
 
 Para que no se desincronicen, la lógica vive en `cuerpo_documentacion`,
 `cuerpo_resultados` y `cuerpo_sandbox` (`ui/tab_asistente.py`) y cada
@@ -31,6 +36,10 @@ comparten a propósito, así preguntás en la burbuja y la charla sigue estando 
 el tab.
 
 ### Cómo flota la burbuja
+
+Va **arriba a la derecha**, con un `top` que esquiva la barra propia de
+Streamlit (el menú y el botón de deploy viven en esa esquina). Si alguna vez se
+superponen, ese número es lo único a subir.
 
 Streamlit no tiene widgets flotantes. El disparador es un `st.button` dentro de
 un `st.container(key=...)`: desde Streamlit **1.39** esa key se traduce en una
@@ -146,9 +155,15 @@ asistente_flotante(resultados_fisicos, PARAMS,
                    serie=st.session_state.get("serie"), factor_mm=FACTOR_MM)
 ```
 
-En la pantalla de bienvenida (antes del `st.stop()` que corta cuando no hay
-corrida) se dibuja además el panel completo: es justo el momento en que alguien
-ajeno más lo necesita, y ahí el buscador y el glosario ya funcionan.
+La burbuja se llama **dos veces** en `app.py`: una antes del `st.stop()` de la
+pantalla de bienvenida y otra al final del script. Nunca corren las dos en la
+misma ejecución (el `st.stop()` corta), así que no hay choque de claves de
+widget.
+
+La pantalla previa a la corrida es `ui/bienvenida.py`: la guía de uso, el aviso
+de las unidades y el del botón. **No lleva asistente embebido** — para eso está
+la burbuja, que ahí también está. Una sola entrada a la ayuda, siempre en el
+mismo lugar.
 
 Se le pasa `resultados_fisicos` (STD), **no** la vista 9.300: el explicador
 declara sus unidades y el sandbox trabaja en STD.

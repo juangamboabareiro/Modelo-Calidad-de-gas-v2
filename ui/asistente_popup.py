@@ -1,6 +1,6 @@
 """
-El asistente como burbuja flotante (abajo a la derecha).
-========================================================
+El asistente como burbuja flotante (arriba a la derecha).
+=========================================================
 
 El mismo asistente que el tab, pero disponible SIEMPRE, sin tener que
 abandonar lo que estabas mirando. Es la forma en que la gente espera encontrar
@@ -54,15 +54,18 @@ CLAVE_BOTON = "asistente_burbuja"
 # respuesta y el boton de enviar se te escapa hacia abajo mientras escribis.
 ALTO_CUERPO = 420
 
+# `top` esquiva la barra propia de Streamlit (el menu y el boton de deploy
+# viven en la esquina superior derecha, ~3.75rem de alto). Si algun dia la
+# burbuja se superpone con ese menu, este es el numero a subir.
 _CSS = """
 <style>
 /* La burbuja. `.st-key-asistente_burbuja` es la clase que Streamlit genera a
    partir de la key del container (>= 1.39). Si esta regla no aplica, el boton
-   simplemente queda al final de la pagina: nada se rompe. */
+   simplemente queda en su lugar del flujo: nada se rompe. */
 .st-key-%(key)s {
     position: fixed;
     right: 1.5rem;
-    bottom: 1.5rem;
+    top: 4.2rem;
     z-index: 999;
     width: auto;
 }
@@ -71,9 +74,9 @@ _CSS = """
     padding: 0.6rem 1.1rem;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
 }
-/* En pantallas chicas la burbuja se corre para no taparle el pulgar a nadie. */
+/* En pantallas chicas se pega mas al borde para no comerse el ancho util. */
 @media (max-width: 640px) {
-    .st-key-%(key)s { right: 0.75rem; bottom: 0.75rem; }
+    .st-key-%(key)s { right: 0.6rem; top: 3.6rem; }
 }
 </style>
 """ % {"key": CLAVE_BOTON}
@@ -96,7 +99,7 @@ def asistente_flotante(resultados: dict | None, params=None,
     with st.container(key=CLAVE_BOTON):
         st.button("💬 Ayuda", key="btn_abrir_asistente", on_click=_abrir,
                   help="Buscador de documentación, glosario y lectura de la "
-                       "corrida. No hace falta cerrar nada para volver.")
+                       "corrida. Está disponible siempre, haya corrida o no.")
 
     if not st.session_state.get(CLAVE_ABIERTO):
         return
@@ -127,6 +130,15 @@ def asistente_flotante(resultados: dict | None, params=None,
 def _cuerpo(resultados, params, serie, factor_mm):
     """El contenido del panel: los mismos tres asistentes que el tab."""
     docs, resumen = contexto_ia(resultados, serie, factor_mm)
+
+    # Sin corrida, "Corrida" y "Sandbox" no tienen nada que decir: se muestra
+    # solo la ayuda. Mostrar pestañas vacías es peor que no mostrarlas.
+    if not resultados:
+        with st.container(height=ALTO_CUERPO, border=False):
+            cuerpo_documentacion(docs, sufijo="pop")
+        st.caption("Cuando corras el pipeline aparecen acá la lectura de la "
+                   "corrida y la guía del sandbox.")
+        return
 
     tab_docs, tab_res, tab_sb = st.tabs(["📖 Ayuda", "📊 Corrida", "🛠️ Sandbox"])
 
