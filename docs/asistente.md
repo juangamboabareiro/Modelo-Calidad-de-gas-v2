@@ -4,9 +4,6 @@ Tab del tablero pensado para gente **ajena al proyecto**. Tres asistentes, cada
 uno en **dos capas**: una que funciona siempre y otra que se enciende sola si
 hay credencial de IA.
 
-> El *por qué* de la arquitectura de dos capas está en `decisiones/0009`; acá
-> va el *cómo funciona* y el *cómo se enciende*.
-
 |  | sin credencial (siempre) | con credencial (extra) |
 |---|---|---|
 | 📖 Documentación | buscador de `docs/` + glosario | chat sobre los docs |
@@ -16,6 +13,39 @@ hay credencial de IA.
 **La capa de abajo no usa red, ni key, ni saca un solo dato del servidor.** Es
 la que ve todo el mundo. La de arriba aparece si existe `ANTHROPIC_API_KEY`;
 hasta entonces el tab avisa que existe y no molesta.
+
+## Dos presentaciones, un solo cuerpo
+
+El mismo asistente se muestra de dos formas:
+
+- **La burbuja 💬** abajo a la derecha, disponible en todo momento sin salir de
+  lo que estás mirando. Es la entrada principal.
+- **El tab Asistente**, para cuando querés leer con espacio.
+
+Para que no se desincronicen, la lógica vive en `cuerpo_documentacion`,
+`cuerpo_resultados` y `cuerpo_sandbox` (`ui/tab_asistente.py`) y cada
+presentación sólo decide dónde dibujarlas. De ahí el parámetro `sufijo`:
+Streamlit exige claves de widget únicas y las dos presentaciones dibujan los
+mismos botones. **Las historias de conversación NO llevan sufijo**: se
+comparten a propósito, así preguntás en la burbuja y la charla sigue estando en
+el tab.
+
+### Cómo flota la burbuja
+
+Streamlit no tiene widgets flotantes. El disparador es un `st.button` dentro de
+un `st.container(key=...)`: desde Streamlit **1.39** esa key se traduce en una
+clase `st-key-<key>` en el DOM, que es el hook oficial para CSS (tanto que
+`stylable_container` de streamlit-extras quedó deprecado a favor suyo). El
+panel es un `st.dialog` (GA desde **1.37**), modal de verdad y manejado por
+Streamlit.
+
+O sea: de todo el asistente, **lo único que depende de CSS es la posición de un
+botón**. Si esa regla algún día deja de aplicar, el botón aparece en su lugar
+normal del flujo y nada más se rompe. Con Streamlit < 1.37 el modal se degrada
+a un expander.
+
+Dentro del modal la entrada de texto es un `text_input` + botón, **no**
+`st.chat_input`: ese widget tiene restricciones sobre dónde puede vivir.
 
 ## Por qué híbrido
 
@@ -52,26 +82,38 @@ pregunten distinto.
 No es semántico: "por qué no cierra el balance" encuentra la sección de balance
 por la palabra, no por el sentido. Para eso está el glosario.
 
+**Respeta la jerarquía documental del README.** Un buscador que trate a todos
+los documentos por igual puede contestar con un TODO de `bitacora.md` resuelto
+hace meses, con la misma cara de certeza que si citara `dominio.md`. Por eso:
+
+- `PESOS` — multiplica el puntaje por documento. `dominio.md` y
+  `manual_usuario.md` arriba; `mapa.md` (generado) y `bitacora.md` (histórico,
+  no fuente de verdad) abajo.
+- `OBSOLETOS` — los saca del índice. Son los archivos que el README declara
+  eliminados (`data_dictionary.md`, `decisions.md`, `changelog.md`, `arq.md`);
+  si siguen en la carpeta, el tab lo avisa en pantalla para que se borren.
+- `ADVERTENCIAS` — el aviso que se muestra sobre un resultado de un documento
+  que hay que leer con reservas.
+
+Un documento nuevo entra solo, con peso 1.0. Sólo hay que tocar el archivo si
+es histórico, obsoleto o especialmente autoritativo.
+
+**También indexa `flujo_pipeline_gas.html`**, con un limpiador de etiquetas
+mínimo. Sería absurdo que el documento que el README llama *el mejor punto de
+entrada para alguien que viene del Excel* fuera justo el único invisible para
+el buscador.
+
 ### Explicador (`ia/explicador.py`)
 
 Una lista de reglas, cada una con su umbral y su texto. Devuelve `Hallazgo`s con
 nivel (`problema`/`atencion`/`ok`/`info`), título, detalle con los números a la
 vista y **en qué tab mirarlo**. Hoy cubre: balance, estado de TBX, saturación y
-bypass por planta, derivaciones, PCS/IW de la mezcla contra los máximos, HUBs sin
+bypass por planta, derivaciones, volumen a sistema de transporte, HUBs sin
 reparto y el panel de calidad de datos.
-
-> ⚠️ **A borrar.** La regla de PCS/IW, los términos `PCS` e `IW` del glosario y
-> `_CANDIDATOS_MAX` quedaron de cuando el modelo calculaba calidad de gas. Ya no
-> la calcula, así que esa regla no puede dar más que "sin datos": sacala. Ver
-> `decisiones/0008`.
 
 Los umbrales están todos juntos arriba del archivo. Agregar una regla es una
 función que reciba el contexto y devuelva `Hallazgo`s, sumada a `_REGLAS`; si una
 regla falla, se reporta esa y las demás siguen.
-
-Los máximos de PCS/IW se buscan en `PARAMS` probando varios nombres
-(`PCS_MAX`, `MAX_PCS`, …). **Si el tuyo no está en `_CANDIDATOS_MAX`,
-agregalo** — sin él, el hallazgo se muestra igual pero sin la comparación.
 
 ### Capa IA
 
@@ -89,15 +131,24 @@ agregalo** — sin él, el hallazgo se muestra igual pero sin la comparación.
 
 ```python
 from ui.tab_asistente import panel_asistente
+from ui.asistente_popup import asistente_flotante
 
+# 1. El tab
 (tab_resumen, ..., tab_sandbox, tab_asistente) = st.tabs(
-    [..., "Plantas (sandbox)", "💬 Asistente"])
+    [..., "Plantas (sandbox)", "Asistente"])
 
 with tab_asistente:
-    _render_seguro("Asistente", panel_asistente,
-                   resultados_fisicos, PARAMS,
-                   serie=st.session_state.get("serie"))
+    _render_seguro("Asistente", panel_asistente, resultados_fisicos, PARAMS,
+                   serie=st.session_state.get("serie"), factor_mm=FACTOR_MM)
+
+# 2. La burbuja — al FINAL del script y FUERA de todo `with tab:`
+asistente_flotante(resultados_fisicos, PARAMS,
+                   serie=st.session_state.get("serie"), factor_mm=FACTOR_MM)
 ```
+
+En la pantalla de bienvenida (antes del `st.stop()` que corta cuando no hay
+corrida) se dibuja además el panel completo: es justo el momento en que alguien
+ajeno más lo necesita, y ahí el buscador y el glosario ya funcionan.
 
 Se le pasa `resultados_fisicos` (STD), **no** la vista 9.300: el explicador
 declara sus unidades y el sandbox trabaja en STD.
@@ -186,21 +237,3 @@ corporativo o a un modelo local (Ollama), se toca ese archivo y nada más.
 - Situación que se repite en las corridas → hacela una regla del explicador.
 - Herramienta nueva para el agente → esquema en `ESQUEMAS` + método homónimo en
   `Ejecutor`.
-
-## Relación con el resto de la documentación
-
-El asistente **no es una fuente de verdad paralela**: lee `docs/`. Eso tiene
-dos consecuencias que conviene tener presentes.
-
-- Un documento mal escrito produce una respuesta mal fundada, y ahora con más
-  alcance que antes. La calidad de `dominio.md` y `linaje.md` es ahora también
-  la calidad del asistente.
-- Un documento nuevo mejora al asistente sin tocar código. Es la vía más barata
-  que hay para que el tablero explique algo que hoy no explica.
-
-| Si querés que el asistente… | Tocá… |
-|---|---|
-| sepa de un tema nuevo | un `.md` en `docs/` (lo indexa solo) |
-| entienda cómo se dice algo en la jerga del proyecto | el `GLOSARIO` |
-| avise de una situación que se repite en las corridas | una regla del explicador |
-| pueda hacer algo nuevo en el sandbox | un esquema en `ESQUEMAS` + su método en `Ejecutor` |

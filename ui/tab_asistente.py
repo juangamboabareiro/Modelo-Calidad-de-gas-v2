@@ -1,39 +1,38 @@
 """
-Tab "Asistente" para app.py — HIBRIDO.
-======================================
+El asistente: los tres cuerpos, y el tab que los muestra.
+=========================================================
 
-Tres asistentes, cada uno en dos capas:
+Tres asistentes, cada uno en DOS capas:
 
                     | sin credencial (siempre)      | con credencial (extra)
   ------------------|-------------------------------|------------------------
-  📖 Documentación  | buscador + glosario           | chat sobre los docs
-  📊 Resultados     | explicador determinista       | chat sobre la corrida
-  🛠️ Sandbox        | guia paso a paso              | agente con herramientas
+  📖 Documentación  | buscador de `docs/` + glosario | chat sobre los docs
+  📊 Resultados     | explicador determinista        | chat sobre la corrida
+  🛠️ Sandbox        | guía paso a paso               | agente con herramientas
 
-La capa de abajo NO necesita red, ni key, ni que salga un solo dato del
-servidor. Es la que ve todo el mundo. La de arriba aparece sola si hay
-`ANTHROPIC_API_KEY` configurada, y hasta entonces el tab avisa que existe pero
-no molesta.
+La capa de abajo no usa red, ni key, ni saca un dato del servidor. La de arriba
+aparece sola si hay credencial.
 
-Por que hibrido y no una cosa u otra
-------------------------------------
-El buscador y el explicador son mas confiables que un modelo para lo que mas se
-pregunta ("que es esto", "por que da esto"): no alucinan y las reglas las
-escribimos nosotros. El modelo aporta en lo que ellos no pueden: reformular una
-pregunta mal planteada, cruzar dos docs, y operar el sandbox por lenguaje
-natural. Tener las dos capas significa que el tablero es util para alguien de
-afuera desde el dia uno, y que habilitar la IA despues es cambiar un secreto.
+DOS PRESENTACIONES, UN SOLO CUERPO
+----------------------------------
+El mismo asistente se muestra de dos formas: como tab (`panel_asistente`) y
+como burbuja flotante (`ui/asistente_popup.py`). Para que no haya dos versiones
+que se desincronicen, la lógica vive en `cuerpo_documentacion`,
+`cuerpo_resultados` y `cuerpo_sandbox`, y cada presentación solo decide dónde
+dibujarlas.
 
-Integracion en app.py (dos lineas + un tab):
+De ahí el parámetro `sufijo`: Streamlit exige claves de widget únicas, y si el
+tab y el modal dibujan el mismo botón con la misma clave, la app revienta. El
+sufijo distingue las claves — pero NO las historias de conversación, que se
+comparten a propósito: preguntás en la burbuja, cerrás, abrís el tab, y la
+charla está ahí.
 
-    from ui.tab_asistente import panel_asistente
-    ...
-    with tab_asistente:
-        _render_seguro("Asistente", panel_asistente,
-                       resultados_fisicos, PARAMS,
-                       serie=st.session_state.get("serie"))
+Integración en app.py:
 
-OJO: `resultados_fisicos` (STD), no la vista 9.300.
+    from ui.tab_asistente import panel_asistente          # el tab
+    from ui.asistente_popup import asistente_flotante     # la burbuja
+
+OJO: se le pasa `resultados_fisicos` (STD), no la vista 9.300.
 """
 
 from __future__ import annotations
@@ -41,25 +40,26 @@ from __future__ import annotations
 import streamlit as st
 
 from ia.buscador import (
-    construir_indice, buscar, buscar_glosario, preview, GLOSARIO,
+    construir_indice, buscar, buscar_glosario, preview, obsoletos_presentes,
+    GLOSARIO,
 )
 from ia.explicador import explicar, PREGUNTAS
 
 # La capa de IA es OPCIONAL hasta en el import: si falta el paquete
-# `anthropic`, el tab tiene que seguir funcionando completo sin ella.
+# `anthropic`, el asistente tiene que seguir funcionando completo sin ella.
 try:
     from ia.cliente import (
         stream_texto, completar, hay_credencial, modelo_configurado, SinAPIKey,
         leer_uso, resumen_uso,
     )
     from ia.contexto import cargar_docs, resumen_resultados, bloques_system
-    from ia.herramientas import ESQUEMAS, Ejecutor
     IA_IMPORTABLE = True
     ERROR_IA = ""
 except Exception as e:  # noqa: BLE001
     IA_IMPORTABLE = False
     ERROR_IA = f"{type(e).__name__}: {e}"
 
+# Las historias NO llevan sufijo: son compartidas entre el tab y la burbuja.
 CLAVES_HISTORIA = {
     "docs": "asistente_hist_docs",
     "resultados": "asistente_hist_res",
@@ -78,8 +78,16 @@ _NIVELES = {
 
 
 def ia_disponible() -> bool:
-    """Hay SDK Y credencial: recien ahi se ofrece el chat."""
+    """Hay SDK Y credencial: recién ahí se ofrece el chat."""
     return IA_IMPORTABLE and hay_credencial()
+
+
+def contexto_ia(resultados, serie, factor_mm) -> tuple[str, str]:
+    """(docs, resumen) para los chats. Vacíos si no hay IA: son la parte cara."""
+    if not ia_disponible():
+        return "", ""
+    docs, _ = cargar_docs()
+    return docs, resumen_resultados(resultados, factor_mm=factor_mm, serie=serie)
 
 
 # ===========================================================================
@@ -88,79 +96,79 @@ def ia_disponible() -> bool:
 
 @st.cache_data(show_spinner=False)
 def _indice_cacheado(carpeta: str = "docs"):
-    """El indice se relee cuando cambia el codigo o se limpia el cache.
-
-    Si estas editando los .md y no ves los cambios, el boton "Reindexar"
-    limpia esto.
-    """
+    """Se relee al limpiar el caché (botón Reindexar) o al cambiar el código."""
     return construir_indice(carpeta)
 
 
-def _bloque_buscador():
+def cuerpo_documentacion(docs: str = "", sufijo: str = "tab"):
+    """Buscador + glosario, y el chat plegado abajo si hay credencial."""
     indice = _indice_cacheado()
 
     col_a, col_b = st.columns([4, 1])
     consulta = col_a.text_input(
-        "Buscá en la documentación", key="buscador_q",
+        "Buscá en la documentación", key=f"buscador_q_{sufijo}",
         placeholder="cascada, retenidos, por qué no cierra el balance…",
         label_visibility="collapsed")
-    if col_b.button("↻ Reindexar", key="btn_reindexar",
-                    help="Volvé a leer los .md de docs/."):
+    if col_b.button("↻", key=f"btn_reindexar_{sufijo}",
+                    help="Volvé a leer los documentos de docs/."):
         _indice_cacheado.clear()
         st.rerun()
 
     if not indice:
-        st.warning("No encontré archivos .md en `docs/`: el buscador no tiene "
+        st.warning("No encontré documentos en `docs/`: el buscador no tiene "
                    "material.")
         return
 
-    st.caption(f"{len(indice)} secciones indexadas. El buscador **no genera "
-               "texto**: te muestra los fragmentos reales de la documentación.")
+    # Los archivos que el README da por eliminados pero siguen en la carpeta:
+    # el buscador ya los ignora, pero mientras estén ahí alguien los va a abrir
+    # a mano y creerles.
+    sobrantes = obsoletos_presentes()
+    if sobrantes:
+        st.warning(
+            f"Estos archivos figuran como eliminados en el README pero siguen "
+            f"en `docs/`: `{'`, `'.join(sobrantes)}`. El buscador los ignora; "
+            "conviene borrarlos del repo.")
 
     if not consulta:
+        st.caption(f"{len(indice)} secciones indexadas. El buscador **no genera "
+                   "texto**: muestra los fragmentos reales.")
         with st.expander("📚 Glosario: los términos del tablero", expanded=True):
-            st.caption("Lo mínimo para entender la primera pantalla.")
             for termino, datos in GLOSARIO.items():
                 st.markdown(f"**{termino}** — {datos['texto']}")
-        return
+    else:
+        # El glosario primero: si preguntan "qué es la cascada", la definición
+        # curada le gana a cualquier sección de un documento técnico.
+        for termino, texto in buscar_glosario(consulta):
+            st.info(f"**{termino}** — {texto}")
 
-    # El glosario primero: si preguntan "que es la cascada", la definicion
-    # curada le gana a cualquier seccion de un doc tecnico.
-    for termino, texto in buscar_glosario(consulta):
-        st.info(f"**{termino}** — {texto}")
+        resultados = buscar(consulta, indice)
+        if not resultados:
+            st.warning(
+                "Sin resultados. Probá con una palabra sola y del vocabulario "
+                "del modelo (planta, hub, cromatografía, retenidos, bypass).")
+        for r in resultados:
+            with st.expander(f"**{r['titulo']}** · `{r['archivo']}`"):
+                if r.get("aviso"):
+                    st.caption(f"⚠️ {r['aviso']}")
+                visible, resto = preview(r["cuerpo"])
+                st.markdown(visible)
+                if resto:
+                    with st.expander("Ver el resto de la sección"):
+                        st.markdown(resto)
 
-    resultados = buscar(consulta, indice)
-    if not resultados:
-        st.warning(
-            "Sin resultados. Probá con una palabra sola y del vocabulario del "
-            "modelo (planta, hub, cromatografía, retenidos, gasoducto).")
-        return
-
-    for r in resultados:
-        with st.expander(f"**{r['titulo']}** · `{r['archivo']}`", expanded=False):
-            visible, resto = preview(r["cuerpo"])
-            st.markdown(visible)
-            if resto:
-                with st.expander("Ver el resto de la sección"):
-                    st.markdown(resto)
-            st.caption(f"Coincidencias: {', '.join(r['terminos'])}")
+    _bloque_ia("Preguntar a la IA sobre la documentación", "docs", sufijo,
+               lambda: _chat("docs", bloques_system("docs", docs), sufijo,
+                             "¿qué es la cascada del pool de gas?"))
 
 
-def _bloque_explicador(resultados, params, serie):
-    st.caption(
-        "Lectura **automática y determinista** de la corrida: son reglas "
-        "escritas a mano sobre los números, no un modelo. Ante los mismos "
-        "datos dice siempre lo mismo.")
-
+def cuerpo_resultados(resultados, params, serie, docs: str = "",
+                      resumen: str = "", sufijo: str = "tab"):
+    """Lectura determinista de la corrida, y el chat plegado abajo."""
     hallazgos = explicar(resultados, params=params, serie=serie)
 
-    pregunta = st.selectbox(
-        "¿Qué querés mirar?", list(PREGUNTAS), key="explicador_q")
+    pregunta = st.selectbox("¿Qué querés mirar?", list(PREGUNTAS),
+                            key=f"explicador_q_{sufijo}")
     filtrados = PREGUNTAS[pregunta](hallazgos) or hallazgos
-
-    if not filtrados:
-        st.info("Nada para reportar en ese punto.")
-        return
 
     for h in filtrados:
         icono, pintar = _NIVELES.get(h.nivel, ("🔵", st.info))
@@ -169,22 +177,33 @@ def _bloque_explicador(resultados, params, serie):
             cuerpo += f"\n\n*Dónde mirarlo: tab {h.donde}.*"
         pintar(cuerpo)
 
+    st.caption("Reglas escritas a mano sobre los números, no un modelo: ante "
+               "los mismos datos dice siempre lo mismo.")
 
-def _bloque_guia_sandbox(resultados):
-    st.caption(
-        "Sin IA el sandbox se opera a mano, y no es difícil: son cuatro pasos.")
+    _bloque_ia("Preguntar a la IA sobre esta corrida", "resultados", sufijo,
+               lambda: _chat("resultados",
+                             bloques_system("resultados", docs, resumen),
+                             sufijo, "¿por qué MEGA tiene sobrante?"))
+
+
+def cuerpo_sandbox(resultados, docs: str = "", resumen: str = "",
+                   factor_mm: float = 1000.0, sufijo: str = "tab"):
+    """Guía del sandbox, y el agente plegado abajo si hay credencial."""
     st.markdown(
-        "1. **Tab _Plantas (sandbox)_** → sub-tab *Plantas*: creá una planta "
-        "o cambiale capacidades a una existente.\n"
-        "2. Sub-tab *Gasoductos*: das de alta o de baja un ducto. El total que "
-        "inyecta cada área no cambia, solo se reparte distinto.\n"
+        "1. **Tab _Plantas (sandbox)_** → *Plantas*: creá una planta o "
+        "cambiale las capacidades a una existente.\n"
+        "2. *Gasoductos*: alta o baja de un ducto. El total que inyecta cada "
+        "área no cambia, sólo se reparte distinto.\n"
         "3. **Resolver cascada**.\n"
         "4. Mirá el **bloque de control**: con el registro sin tocar tiene que "
-        "dar cero. Si da distinto, no le creas al escenario.")
-    st.info(
-        "Los **escenarios prearmados** (sub-tab *Escenarios*) son el atajo: "
-        "dejan un caso completo — plantas, cromatografías y ductos — listo de "
-        "un click, y se pueden guardar y compartir como `.json`.")
+        "dar cero. Si no, no le creas al escenario.")
+    st.caption("Los escenarios prearmados dejan un caso completo —plantas, "
+               "cromatografías y ductos— listo de un click.")
+
+    if resultados:
+        _bloque_ia("Que la IA opere el sandbox", "agente", sufijo,
+                   lambda: _chat_agente(resultados, docs, resumen, factor_mm,
+                                        sufijo))
 
 
 # ===========================================================================
@@ -195,28 +214,63 @@ def _historia(clave: str) -> list[dict]:
     return st.session_state.setdefault(CLAVES_HISTORIA[clave], [])
 
 
+def _mensajes_para_api(historia):
+    return [{"role": m["role"], "content": m["content"]}
+            for m in historia[-MAX_TURNOS_API:]]
+
+
+def _bloque_ia(etiqueta: str, clave: str, sufijo: str, cuerpo):
+    """Envuelve la capa IA en un expander cerrado.
+
+    Cerrado a propósito: la capa sin IA es la respuesta por defecto y el chat
+    es el segundo intento, cuando el buscador no alcanzó.
+    """
+    st.divider()
+    if not ia_disponible():
+        with st.expander("🤖 Chat con IA (desactivado)"):
+            if not IA_IMPORTABLE:
+                st.caption(f"Falta el paquete `anthropic` ({ERROR_IA}).")
+            else:
+                st.caption("Cargá `ANTHROPIC_API_KEY` en "
+                           "`.streamlit/secrets.toml` para sumar un chat que "
+                           "responde preguntas abiertas. Todo lo de arriba "
+                           "funciona igual sin eso.")
+        return
+
+    with st.expander(f"🤖 {etiqueta}"):
+        st.caption(f"Modelo `{modelo_configurado()}`. **Lo que preguntes y el "
+                   "contexto viajan a la API de Anthropic.**")
+        if st.button("🗑️ Limpiar", key=f"btn_limpiar_{clave}_{sufijo}"):
+            st.session_state.pop(CLAVES_HISTORIA[clave], None)
+            st.rerun()
+        cuerpo()
+
+
+def _entrada(clave: str, sufijo: str, ejemplo: str) -> str | None:
+    """La caja de texto. Devuelve el pedido, o None.
+
+    En el modal NO se puede usar `st.chat_input`: ese widget tiene
+    restricciones sobre dónde puede vivir. El par text_input + botón se
+    comporta igual y no depende de esa lista.
+    """
+    with st.form(key=f"form_{clave}_{sufijo}", clear_on_submit=True):
+        texto = st.text_input("Tu pregunta", placeholder=f"p. ej.: «{ejemplo}»",
+                              label_visibility="collapsed")
+        enviado = st.form_submit_button("Preguntar")
+    return texto.strip() if (enviado and texto.strip()) else None
+
+
 def _dibujar_historia(historia):
     for msg in historia:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
 
-def _mensajes_para_api(historia):
-    return [{"role": m["role"], "content": m["content"]}
-            for m in historia[-MAX_TURNOS_API:]]
-
-
-def _boton_limpiar(clave: str):
-    if st.button("🗑️ Limpiar conversación", key=f"btn_limpiar_{clave}"):
-        st.session_state.pop(CLAVES_HISTORIA[clave], None)
-        st.rerun()
-
-
-def _chat_simple(clave: str, system: str, placeholder: str):
+def _chat(clave: str, system, sufijo: str, ejemplo: str):
     historia = _historia(clave)
     _dibujar_historia(historia)
 
-    pregunta = st.chat_input(placeholder, key=f"chat_{clave}")
+    pregunta = _entrada(clave, sufijo, ejemplo)
     if not pregunta:
         return
 
@@ -234,14 +288,14 @@ def _chat_simple(clave: str, system: str, placeholder: str):
             historia.pop()
             st.warning("Se perdió la credencial: revisá `secrets.toml`.")
             return
-        except Exception as e:  # noqa: BLE001 - un fallo de API no tumba el tab
+        except Exception as e:  # noqa: BLE001 - un fallo de API no tumba nada
             historia.pop()
             st.error(f"La llamada a la API falló: {type(e).__name__}: {e}")
             return
 
-        # El consumo va como caption bajo la respuesta: es la unica forma de
-        # notar que el caching esta funcionando (la segunda pregunta tiene que
-        # mostrar "desde cache" y un costo ~10x menor que la primera).
+        # El consumo va como caption bajo la respuesta: es la única forma de
+        # notar que el caching funciona (la segunda pregunta seguida tiene que
+        # decir "desde caché" y costar ~10x menos).
         if uso:
             st.caption(resumen_uso(uso))
 
@@ -256,10 +310,11 @@ def _extraer_texto(respuesta) -> str:
 def _correr_agente(system, mensajes, ejecutor, log, uso_total: dict) -> str:
     """messages -> (tool_use -> ejecutar -> tool_result)* -> texto final.
 
-    `uso_total` acumula el consumo de TODAS las iteraciones: un pedido del
-    agente son varias llamadas a la API, no una, y mostrar solo la ultima
-    subestimaria el costo real del turno.
+    `uso_total` acumula TODAS las iteraciones: un pedido del agente son varias
+    llamadas, y mostrar sólo la última subestimaría el costo del turno.
     """
+    from ia.herramientas import ESQUEMAS
+
     for _ in range(MAX_ITERACIONES_AGENTE):
         respuesta = completar(system, mensajes, tools=ESQUEMAS)
 
@@ -276,7 +331,7 @@ def _correr_agente(system, mensajes, ejecutor, log, uso_total: dict) -> str:
             if getattr(bloque, "type", "") != "tool_use":
                 continue
             with log:
-                with st.status(f"🔧 {bloque.name}", expanded=False) as estado:
+                with st.status(f"🔧 {bloque.name}") as estado:
                     st.code(str(bloque.input), language="json")
                     salida = ejecutor.ejecutar(bloque.name, bloque.input)
                     st.text(salida[:2000])
@@ -293,11 +348,13 @@ def _correr_agente(system, mensajes, ejecutor, log, uso_total: dict) -> str:
             "en un ciclo. Lo hecho quedó en el sandbox; pedime que siga.")
 
 
-def _chat_agente(resultados, docs, resumen, factor_mm):
+def _chat_agente(resultados, docs, resumen, factor_mm, sufijo):
+    from ia.herramientas import Ejecutor
+
     comunes = resultados.get("comunes")
     if not comunes:
-        st.info("El agente necesita `comunes` del pipeline para poder correr "
-                "la cascada.")
+        st.info("El agente necesita `comunes` del pipeline para correr la "
+                "cascada.")
         return
 
     if "registro_plantas" not in st.session_state:
@@ -311,6 +368,10 @@ def _chat_agente(resultados, docs, resumen, factor_mm):
                      "Abrí una vez el tab Plantas (sandbox) y volvé.")
             return
 
+    st.caption("⚠️ Modifica el sandbox, nunca la corrida oficial. Lo que arme "
+               "queda visible en el tab *Plantas (sandbox)* y se deshace con "
+               "**Restablecer**.")
+
     ejecutor = Ejecutor(comunes=comunes,
                         flujos_oficiales=resultados.get("flujos_plantas"),
                         factor_mm=factor_mm)
@@ -319,9 +380,8 @@ def _chat_agente(resultados, docs, resumen, factor_mm):
     historia = _historia("agente")
     _dibujar_historia(historia)
 
-    pedido = st.chat_input(
-        "p. ej.: «bajá el gasoducto VMN y contame qué planta pierde gas»",
-        key="chat_agente")
+    pedido = _entrada("agente", sufijo,
+                      "bajá el gasoducto VMN y decime qué planta pierde gas")
     if not pedido:
         return
 
@@ -334,9 +394,8 @@ def _chat_agente(resultados, docs, resumen, factor_mm):
         uso_total: dict = {}
         try:
             with st.spinner("Trabajando en el sandbox…"):
-                final = _correr_agente(
-                    system, _mensajes_para_api(historia), ejecutor, log,
-                    uso_total)
+                final = _correr_agente(system, _mensajes_para_api(historia),
+                                       ejecutor, log, uso_total)
         except Exception as e:  # noqa: BLE001
             historia.pop()
             st.error(f"El agente falló: {type(e).__name__}: {e}")
@@ -347,92 +406,33 @@ def _chat_agente(resultados, docs, resumen, factor_mm):
 
     historia.append({"role": "assistant", "content": final})
 
-    if st.session_state.get("sandbox_resultado") is not None:
-        st.rerun()
-
-
-def _con_ia(etiqueta: str, clave: str, cuerpo):
-    """Envuelve la capa IA en un expander cerrado.
-
-    Cerrado a proposito: la capa sin IA es la respuesta por defecto, y el chat
-    es el segundo intento cuando el buscador no alcanzo.
-    """
-    with st.expander(f"🤖 {etiqueta}", expanded=False):
-        st.caption(
-            f"Modelo `{modelo_configurado()}`. **Lo que preguntes y el "
-            "contexto viajan a la API de Anthropic.**")
-        _boton_limpiar(clave)
-        cuerpo()
-
-
-def _aviso_ia_apagada():
-    with st.expander("🤖 Chat con IA (desactivado)", expanded=False):
-        if not IA_IMPORTABLE:
-            st.caption(f"Falta el paquete `anthropic` ({ERROR_IA}). "
-                       "Agregalo a requirements.txt si querés habilitarlo.")
-        else:
-            st.caption(
-                "Cargá `ANTHROPIC_API_KEY` en `.streamlit/secrets.toml` para "
-                "sumar un chat que responde preguntas abiertas. Todo lo de "
-                "arriba funciona igual sin eso.")
-
 
 # ===========================================================================
-# Panel
+# El tab
 # ===========================================================================
 
 def panel_asistente(resultados: dict | None, params=None,
                     serie: dict | None = None, factor_mm: float = 1000.0):
-    """Dibuja el tab completo. `resultados` FÍSICOS (STD) o None."""
-
+    """El asistente como tab. `resultados` FÍSICOS (STD) o None."""
     st.subheader("Asistente")
-    hay_ia = ia_disponible()
     st.caption(
         "Buscador de documentación, lectura automática de la corrida y guía "
         "del sandbox. Todo local: no sale ningún dato del servidor."
-        + ("" if hay_ia else " El chat con IA está desactivado."))
+        + ("" if ia_disponible() else " El chat con IA está desactivado.")
+        + " También está disponible en la burbuja 💬 de abajo a la derecha.")
 
-    # Los docs completos y el resumen solo se arman si hay IA: son la parte
-    # cara y la capa de abajo no los usa (el buscador tiene su propio indice).
-    docs = resumen = ""
-    if hay_ia:
-        docs, avisos = cargar_docs()
-        for aviso in avisos:
-            st.warning(aviso)
-        resumen = resumen_resultados(resultados, factor_mm=factor_mm, serie=serie)
+    docs, resumen = contexto_ia(resultados, serie, factor_mm)
 
-    tab_docs, tab_res, tab_op = st.tabs(
+    tab_docs, tab_res, tab_sb = st.tabs(
         ["📖 Documentación", "📊 Resultados", "🛠️ Sandbox"])
 
     with tab_docs:
-        _bloque_buscador()
-        st.divider()
-        if hay_ia:
-            _con_ia("Preguntale a la IA sobre la documentación", "docs",
-                    lambda: _chat_simple(
-                        "docs", bloques_system("docs", docs),
-                        "p. ej.: «¿qué es la cascada del pool de gas?»"))
-        else:
-            _aviso_ia_apagada()
+        cuerpo_documentacion(docs, sufijo="tab")
 
     with tab_res:
-        _bloque_explicador(resultados, params, serie)
-        st.divider()
-        if hay_ia:
-            _con_ia("Preguntale a la IA sobre esta corrida", "resultados",
-                    lambda: _chat_simple(
-                        "resultados", bloques_system("resultados", docs, resumen),
-                        "p. ej.: «¿por qué MEGA tiene sobrante este período?»"))
-        else:
-            _aviso_ia_apagada()
+        if not resultados:
+            st.info("Todavía no hay corrida.")
+        cuerpo_resultados(resultados, params, serie, docs, resumen, sufijo="tab")
 
-    with tab_op:
-        _bloque_guia_sandbox(resultados)
-        st.divider()
-        if hay_ia and resultados:
-            _con_ia("Que la IA opere el sandbox por vos", "agente",
-                    lambda: _chat_agente(resultados, docs, resumen, factor_mm))
-        elif hay_ia:
-            st.info("Corré el pipeline para habilitar el operador con IA.")
-        else:
-            _aviso_ia_apagada()
+    with tab_sb:
+        cuerpo_sandbox(resultados, docs, resumen, factor_mm, sufijo="tab")

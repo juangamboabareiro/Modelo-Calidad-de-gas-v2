@@ -72,7 +72,6 @@ from io_.loaders import (
     load_matriz_inyecciones,
     load_cromas_hubs,
 )
-from ui.compat import ancho, dataframe as mostrar_df
 from ui.esquemas import mostrar_esquema_planta
 from ui.mapa import panel_mapa
 from ui.tablas import panel_tablas
@@ -100,6 +99,7 @@ from ui.diagnosticos import capturar, mostrar as mostrar_diagnostico
 from ui.tab_plantas import panel_tab_plantas
 from ui.tab_graphs import panel_graphs
 from ui.tab_asistente import panel_asistente
+from ui.asistente_popup import asistente_flotante
 from ui.correccion_editor import bloque_correccion
 
 
@@ -180,7 +180,7 @@ def _boton_descarga(df: pd.DataFrame, nombre: str, key: str):
 
 def _mostrar_tabla(nombre: str, df: pd.DataFrame, key_prefix: str):
     st.subheader(nombre)
-    mostrar_df(df)
+    st.dataframe(df, use_container_width=True)
     _boton_descarga(df, nombre.replace(" ", "_"), key=f"{key_prefix}_{nombre}")
 
 
@@ -590,7 +590,7 @@ with st.sidebar.form("parametros", **_form_kwargs):
                               "Δ Ingreso [MMm3/d]", "Convertible desde DP"]),
         num_rows="dynamic",
         key="amp_tty",
-        **ancho(),
+        use_container_width=True,
         column_config={
             **_COLS_AMP,
             "Tren": st.column_config.SelectboxColumn(
@@ -611,7 +611,7 @@ with st.sidebar.form("parametros", **_form_kwargs):
                               "Δ Ingreso [MMm3/d]"]),
         num_rows="dynamic",
         key="amp_mega",
-        **ancho(),
+        use_container_width=True,
         column_config=_COLS_AMP,
     )
     ampliaciones_mega = _parsear_ampliaciones(_amp_mega_df, "Módulo MEGA")
@@ -653,7 +653,7 @@ with st.sidebar.form("parametros", **_form_kwargs):
     guardar_csvs = st.checkbox("Guardar CSVs en disco al ejecutar", value=False)
 
     run = st.form_submit_button(
-        "Ejecutar pipeline", type="primary", **ancho())
+        "Ejecutar pipeline", type="primary", use_container_width=True)
 
     st.header("9. Serie temporal")
     st.caption(
@@ -687,7 +687,7 @@ with st.sidebar.form("parametros", **_form_kwargs):
     # quedaria con el estado del submit anterior. El rango vacio se valida
     # abajo, en el `if run_serie`.
     run_serie = st.form_submit_button(
-        "Calcular serie", **ancho())
+        "Calcular serie", use_container_width=True)
 
 PARAMS = {
     "PERIODO_CONSIDERADO": periodo_ts,
@@ -1977,7 +1977,7 @@ with tab_resumen:
             "sobrante": "{:,.2f}", "vol_derivado": "{:,.2f}", "bypass": "{:,.2f}",
             "lgn_unitario": "{:,.5f}", "lgn_asignado": "{:,.1f}",
         }),
-        **ancho(),
+        use_container_width=True,
     )
     _boton_descarga(flujos_plantas.reset_index(names="Planta"), "flujos_plantas", key="flujos")
 
@@ -1988,7 +1988,7 @@ with tab_cascada:
     else:
         st.caption("Pre-PM: TTY-TBX fuera de servicio, el pool TTY va directo a TTY-DP. "
                    "Valores en MMm3/d.")
-    st.graphviz_chart(_dot_cascada(plantas, tbx_en_servicio_res), **ancho())
+    st.graphviz_chart(_dot_cascada(plantas, tbx_en_servicio_res), use_container_width=True)
 
 def _render_seguro(nombre_tab: str, fn, *args, **kwargs):
     """Ejecuta el contenido de un tab aislando sus errores.
@@ -2088,16 +2088,33 @@ def _mostrar_planta_contenido(nombre_planta, datos):
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("**Composición gas rico (entrada)**")
-        mostrar_df(_a_dataframe_seguro(datos["gas_rico_IN"], "Gas rico IN"))
+        st.dataframe(_a_dataframe_seguro(datos["gas_rico_IN"], "Gas rico IN"),
+                     use_container_width=True)
     with c2:
         st.markdown("**Composición gas residual (salida)**")
-        mostrar_df(_a_dataframe_seguro(datos["gas_residual_OUT"].T, "Gas residual OUT"))
+        st.dataframe(_a_dataframe_seguro(datos["gas_residual_OUT"].T, "Gas residual OUT"),
+                     use_container_width=True)
 
     st.markdown("**LGN retenido (tn/d) — sobre el gas efectivamente tratado**")
-    mostrar_df(_a_dataframe_seguro(datos["retenidos_vol"], "Retenido"))
+    st.dataframe(_a_dataframe_seguro(datos["retenidos_vol"], "Retenido"),
+                 use_container_width=True)
 
 
 for _tab, _nombre in ((tab_tbx, "TTY - TBX"), (tab_dp, "TTY - Dew Point"),
                       (tab_mega, "MEGA")):
     with _tab:
         _render_seguro(_nombre, _mostrar_planta_contenido, _nombre, plantas[_nombre])
+
+
+# ---------------------------------------------------------------------------
+# La burbuja de ayuda, abajo a la derecha.
+# ---------------------------------------------------------------------------
+# Va al FINAL y FUERA de todo `with tab:`: es un elemento de la página, no de
+# un tab. Aislada como los tabs — si el asistente falla, el tablero no se
+# entera.
+try:
+    asistente_flotante(resultados_fisicos, PARAMS,
+                       serie=st.session_state.get("serie"),
+                       factor_mm=FACTOR_MM)
+except Exception as _e:  # noqa: BLE001
+    st.caption(f"(La ayuda flotante falló: {type(_e).__name__}: {_e})")

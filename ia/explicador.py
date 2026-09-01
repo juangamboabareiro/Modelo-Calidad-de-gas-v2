@@ -32,24 +32,6 @@ UMBRAL_BYPASS = 1.0           # MMm3/d de bypass que ya merecen mencionarse
 
 FACTOR_MM = 1000.0
 
-# Nombres posibles del maximo contractual en PARAMS. No se cual usa el
-# proyecto, asi que se prueban varios y si no aparece ninguno el hallazgo se
-# reporta igual, sin la comparacion. Si el tuyo no esta, agregalo aca.
-_CANDIDATOS_MAX = {
-    "pcs": ("PCS_MAX", "PCS_MAXIMO", "MAX_PCS", "PCS_MAX_TRANSPORTE"),
-    "iw": ("IW_MAX", "IW_MAXIMO", "MAX_IW", "IW_MAX_TRANSPORTE"),
-}
-
-
-def _maximo(params: dict, clave: str):
-    """Primer candidato presente y no nulo, o None."""
-    for nombre in _CANDIDATOS_MAX.get(clave, ()):
-        valor = params.get(nombre)
-        if valor:
-            return float(valor)
-    return None
-
-
 @dataclass
 class Hallazgo:
     nivel: str
@@ -193,46 +175,27 @@ def _r_capacidad(ctx: Contexto) -> list[Hallazgo]:
     return hallazgos
 
 
-def _r_calidad(ctx: Contexto) -> list[Hallazgo]:
-    """PCS e IW de la mezcla a transporte contra los maximos, si estan."""
+def _r_mezcla(ctx: Contexto) -> list[Hallazgo]:
+    """Cuanto gas entra al sistema de transporte y de donde sale.
+
+    Ojo: aca NO va nada de calidad de gas. El modelo dejo de calcular poder
+    calorifico e indice de Wobbe (decisiones/0008); si alguna vez vuelven,
+    vuelven como regla nueva, no reviviendo la vieja.
+    """
     mezcla = ctx.resultados.get("mezcla_transporte") or {}
-    if not mezcla:
-        return []
-
-    hallazgos = []
-    for clave, etiqueta in (("pcs", "PCS"), ("iw", "IW")):
-        valor = mezcla.get(clave)
-        if valor is None:
-            continue
-        maximo = _maximo(ctx.params, clave)
-        if maximo:
-            margen = float(maximo) - float(valor)
-            nivel = "atencion" if margen < 0 else "ok"
-            verbo = "SUPERA" if margen < 0 else "esta debajo de"
-            hallazgos.append(Hallazgo(
-                nivel, f"{etiqueta} de la mezcla: {valor:,.0f} kcal/m3",
-                f"{verbo} el maximo de {float(maximo):,.0f} "
-                f"(margen {margen:,.0f} kcal/m3).",
-                "Graphs"))
-        else:
-            hallazgos.append(Hallazgo(
-                "info", f"{etiqueta} de la mezcla: {valor:,.0f} kcal/m3",
-                "Es la calidad del gas que entra al sistema de transporte.",
-                "Graphs"))
-
     volumenes = {k: v for k, v in mezcla.items()
                  if k.startswith("vol_") and v is not None}
-    if volumenes:
-        total = sum(float(v) for v in volumenes.values())
-        partes = ", ".join(
-            f"{k.replace('vol_', '').replace('_', ' ')} {float(v):,.2f}"
-            for k, v in volumenes.items())
-        hallazgos.append(Hallazgo(
-            "info", f"Inyeccion a transporte: {total:,.2f} MMm3/d",
-            f"Se compone de: {partes}. Es la lamina objetivo del tablero.",
-            "Graphs"))
+    if not volumenes:
+        return []
 
-    return hallazgos
+    total = sum(float(v) for v in volumenes.values())
+    partes = ", ".join(
+        f"{k.replace('vol_', '').replace('_', ' ')} {float(v):,.2f}"
+        for k, v in volumenes.items())
+    return [Hallazgo(
+        "info", f"Inyeccion a transporte: {total:,.2f} MMm3/d",
+        f"Se compone de: {partes}.",
+        "Graphs")]
 
 
 def _r_hubs(ctx: Contexto) -> list[Hallazgo]:
@@ -269,7 +232,7 @@ def _r_diagnostico(ctx: Contexto) -> list[Hallazgo]:
 
 
 _REGLAS = (_r_balance, _r_diagnostico, _r_tbx, _r_capacidad,
-           _r_calidad, _r_hubs)
+           _r_mezcla, _r_hubs)
 
 _ORDEN_NIVEL = {"problema": 0, "atencion": 1, "ok": 2, "info": 3}
 
@@ -314,9 +277,8 @@ PREGUNTAS = {
         lambda hs: [h for h in hs if "tope" in h.titulo or "bypass" in h.titulo],
     "¿Cierra el balance?":
         lambda hs: [h for h in hs if "balance" in h.titulo.lower()],
-    "¿Cómo está la calidad del gas (PCS/IW)?":
-        lambda hs: [h for h in hs if "PCS" in h.titulo or "IW" in h.titulo
-                    or "transporte" in h.titulo],
+    "¿Cuánto gas llega al sistema de transporte?":
+        lambda hs: [h for h in hs if "transporte" in h.titulo],
     "¿Hay problemas con los datos de entrada?":
         lambda hs: [h for h in hs if "observaci" in h.titulo
                     or "HUB" in h.titulo],
