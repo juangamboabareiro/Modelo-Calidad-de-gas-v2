@@ -4,87 +4,15 @@ Tab del tablero pensado para gente **ajena al proyecto**. Tres asistentes, cada
 uno en **dos capas**: una que funciona siempre y otra que se enciende sola si
 hay credencial de IA.
 
-| Dónde | Qué | sin credencial (siempre) | con credencial (extra) |
-|---|---|---|---|
-| **Burbuja 💬** | 📖 Documentación | buscador de `docs/` + glosario | chat sobre los docs |
-| **Tab Asistente** | 📊 Resultados | explicador determinista de la corrida | chat sobre la corrida |
-| **Tab Asistente** | 🛠️ Sandbox | guía paso a paso | agente que opera el sandbox |
+|  | sin credencial (siempre) | con credencial (extra) |
+|---|---|---|
+| 📖 Documentación | buscador de `docs/` + glosario | chat sobre los docs |
+| 📊 Resultados | explicador determinista de la corrida | chat sobre la corrida |
+| 🛠️ Sandbox | guía paso a paso | agente que opera el sandbox |
 
 **La capa de abajo no usa red, ni key, ni saca un solo dato del servidor.** Es
 la que ve todo el mundo. La de arriba aparece si existe `ANTHROPIC_API_KEY`;
 hasta entonces el tab avisa que existe y no molesta.
-
-## El reparto: burbuja vs tab
-
-- **La burbuja 💬**, arriba a la derecha: **sólo documentación**, glosario y
-  buscador. Disponible en todo momento, haya corrida o no.
-- **El tab Asistente**: **resultados y sandbox**. Sólo existe después de correr
-  el pipeline, porque los tabs no se dibujan antes.
-
-El criterio es el momento de uso. La documentación se consulta en cualquier
-momento y de a ratos cortos ("¿qué era el bypass?"), y no depende de que haya
-corrida: es exactamente lo que tiene que estar a un click desde cualquier
-pantalla. Los otros dos necesitan una corrida y se leen con espacio.
-
-Y hace que la burbuja sea **barata**: no toca el explicador ni el resumen de la
-corrida, por eso se puede dibujar arriba de todo sin costo.
-
-Los tres cuerpos igual viven juntos en `ui/tab_asistente.py`
-(`cuerpo_documentacion`, `cuerpo_resultados`, `cuerpo_sandbox`), reutilizables,
-para que no haya dos versiones que se desincronicen.
-
-Para que no se desincronicen, la lógica vive en `cuerpo_documentacion`,
-`cuerpo_resultados` y `cuerpo_sandbox` (`ui/tab_asistente.py`) y cada
-presentación sólo decide dónde dibujarlas. De ahí el parámetro `sufijo`:
-Streamlit exige claves de widget únicas y las dos presentaciones dibujan los
-mismos botones. **Las historias de conversación NO llevan sufijo**: se
-comparten a propósito, así preguntás en la burbuja y la charla sigue estando en
-el tab.
-
-### Cómo flota la burbuja
-
-Va **arriba a la derecha**, con un `top` que esquiva la barra propia de
-Streamlit (el menú y el botón de deploy viven en esa esquina). Si alguna vez se
-superponen, ese número es lo único a subir.
-
-Streamlit no tiene widgets flotantes. El disparador es un `st.button` dentro de
-un `st.container(key=...)`: desde Streamlit **1.39** esa key se traduce en una
-clase `st-key-<key>` en el DOM, que es el hook oficial para CSS (tanto que
-`stylable_container` de streamlit-extras quedó deprecado a favor suyo). El
-panel es un `st.dialog` (GA desde **1.37**), modal de verdad y manejado por
-Streamlit.
-
-O sea: de todo el asistente, **lo único que depende de CSS es la posición de un
-botón**. Si esa regla algún día deja de aplicar, el botón aparece en su lugar
-normal del flujo y nada más se rompe. Con Streamlit < 1.37 el modal se degrada
-a un expander.
-
-Dentro del modal la entrada de texto es un `text_input` + botón, **no**
-`st.chat_input`: ese widget tiene restricciones sobre dónde puede vivir.
-
-### Por qué abre rápido
-
-Son dos costos distintos y conviene no confundirlos:
-
-- **Abrir** el modal es un rerun de app: Streamlit vuelve a correr el script
-  entero. Como va mandando los elementos a medida que los produce, dibujar la
-  burbuja **arriba de todo** hace que el modal aparezca enseguida y el resto de
-  la página se siga armando abajo. Cuando estaba al final del script había que
-  esperar a que se rehicieran los tabs, el graphviz, el mapa y las tablas.
-- **Interactuar dentro** del modal no es un rerun de app: `st.dialog` hereda el
-  comportamiento de `st.fragment`, así que escribir en el buscador sólo vuelve
-  a correr la función del diálogo. Eso ya venía gratis.
-
-> ⚠️ **No envolver la burbuja en `st.fragment`** para acelerar la apertura.
-> Anidar un diálogo dentro de un fragment tiene bugs conocidos: modales que no
-> cierran, contenido que desaparece al interactuar. El patrón que usa el
-> módulo —llamar al diálogo detrás del `if st.button(...)`— es el que
-> recomienda la documentación de Streamlit.
-
-Además, `_docs_crudos()` (la documentación concatenada para el contexto de la
-IA) está cacheada: la burbuja se dibuja en todos los reruns, y leer la carpeta
-entera cada vez se nota. El botón de reindexar limpia ese caché y el del
-índice.
 
 ## Por qué híbrido
 
@@ -170,33 +98,33 @@ regla falla, se reporta esa y las demás siguen.
 
 ```python
 from ui.tab_asistente import panel_asistente
-from ui.asistente_popup import asistente_flotante
 
-# 1. El tab
 (tab_resumen, ..., tab_sandbox, tab_asistente) = st.tabs(
     [..., "Plantas (sandbox)", "Asistente"])
 
 with tab_asistente:
     _render_seguro("Asistente", panel_asistente, resultados_fisicos, PARAMS,
                    serie=st.session_state.get("serie"), factor_mm=FACTOR_MM)
-
-# 2. La burbuja — lo más ARRIBA posible, una sola vez, sin argumentos
-asistente_flotante()
 ```
-
-La burbuja se llama **una sola vez y lo más arriba posible**, antes de los tabs
-y antes del `st.stop()` de la bienvenida. Así funciona en las dos pantallas con
-un único punto de llamada, y abre rápido (ver abajo).
-
-La pantalla previa a la corrida es `ui/bienvenida.py`: la guía de uso, el aviso
-de las unidades y el del botón. **No lleva asistente embebido** — para eso está
-la burbuja, que ahí también está. Una sola entrada a la ayuda, siempre en el
-mismo lugar.
 
 Se le pasa `resultados_fisicos` (STD), **no** la vista 9.300: el explicador
 declara sus unidades y el sandbox trabaja en STD.
 
+**El asistente existe sólo después de correr el pipeline**, porque los tabs no
+se dibujan antes. La pantalla previa es `ui/bienvenida.py`: la guía de uso, el
+aviso de las unidades y el del botón, y nada más.
+
 Sin nada más que eso, el tab ya funciona completo en modo sin IA.
+
+> **Hubo una versión con burbuja flotante** (un `st.dialog` disparado desde un
+> botón fijado con CSS), disponible también antes de la corrida. Se sacó: dos
+> entradas a lo mismo obligaban a mantener la posición con CSS y a duplicar
+> claves de widget, para un beneficio que no compensaba. Si alguna vez se
+> retoma, lo aprendido: `st.dialog` ya hereda el comportamiento de
+> `st.fragment` —interactuar adentro no rerenderiza la app— pero **abrirlo** sí
+> es un rerun completo, así que el disparador tiene que dibujarse arriba de
+> todo para que el modal aparezca rápido. Y no envolverlo en un fragment:
+> anidar diálogos en fragments tiene bugs conocidos.
 
 ## Encender la IA (opcional)
 

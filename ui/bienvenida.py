@@ -7,9 +7,8 @@ sola linea ("elegi los parametros y apreta Ejecutar"), que no alcanza para
 alguien ajeno al proyecto: no sabe que es el pipeline, ni que va a ver despues,
 ni en que unidades cargar las capacidades.
 
-No lleva asistente embebido: para eso esta la burbuja de ayuda, que esta
-presente en esta pantalla igual que en el resto. Una sola entrada a la ayuda,
-en el mismo lugar siempre.
+No lleva asistente embebido a proposito: esta pantalla tiene que decir una sola
+cosa —como arrancar— y el asistente completo esta en su tab apenas hay corrida.
 """
 
 from __future__ import annotations
@@ -66,6 +65,6 @@ def panel_bienvenida():
         "**MMm³/d**. Cargar `25` donde va `25000` no falla — devuelve números "
         "mal. Ante un resultado raro, revisá esto primero.")
 
-    st.caption("¿Dudas sobre algún término? La burbuja 💬 de arriba a la "
-               "derecha tiene el glosario y un buscador sobre toda la "
-               "documentación. Funciona sin conexión.")
+    st.caption("Una vez que corras el pipeline, el tab **Asistente** tiene un "
+               "glosario, un buscador sobre toda la documentación y una "
+               "lectura automática de la corrida. Funciona sin conexión.")

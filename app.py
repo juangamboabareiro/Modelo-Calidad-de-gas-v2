@@ -99,7 +99,6 @@ from ui.diagnosticos import capturar, mostrar as mostrar_diagnostico
 from ui.tab_plantas import panel_tab_plantas
 from ui.tab_graphs import panel_graphs
 from ui.tab_asistente import panel_asistente
-from ui.asistente_popup import asistente_flotante
 from ui.bienvenida import panel_bienvenida
 from ui.correccion_editor import bloque_correccion
 
@@ -1882,28 +1881,12 @@ def construir_vista_9300(resultados: dict):
     return vista, avisos
 
 
-# ---------------------------------------------------------------------------
-# La burbuja de ayuda (arriba a la derecha).
-# ---------------------------------------------------------------------------
-# Va ACÁ ARRIBA, antes de los tabs y antes del `st.stop()` de la bienvenida, por
-# dos razones. La primera es que así hay UN solo punto de llamada y funciona en
-# las dos pantallas. La segunda es velocidad: abrir el modal es un rerun de app,
-# y Streamlit va mandando los elementos a medida que los produce — dibujada
-# arriba, la ayuda aparece enseguida y el resto de la página se sigue armando
-# abajo. Al final del script, en cambio, había que esperar a que se rehicieran
-# todos los tabs.
-try:
-    asistente_flotante()
-except Exception as _e:  # noqa: BLE001 - la ayuda nunca tumba el tablero
-    st.caption(f"(La ayuda flotante falló: {type(_e).__name__}: {_e})")
-
-
 resultados = st.session_state.get("resultados")
 
 if resultados is None:
-    # Pre-ejecución: la guía de uso, y nada más. El asistente NO se dibuja
-    # embebido acá: vive en la burbuja, que está en esta pantalla igual que en
-    # el resto. Una sola entrada a la ayuda, en el mismo lugar siempre.
+    # Pre-ejecución: la guía de uso, y nada más. Esta pantalla tiene que decir
+    # una sola cosa —cómo arrancar—; el asistente completo está en su tab
+    # apenas hay corrida.
     panel_bienvenida()
 
     st.stop()

@@ -13,31 +13,23 @@ Tres asistentes, cada uno en DOS capas:
 La capa de abajo no usa red, ni key, ni saca un dato del servidor. La de arriba
 aparece sola si hay credencial.
 
-DOS ENTRADAS, REPARTIDAS POR COSTO Y POR MOMENTO
-------------------------------------------------
-    burbuja 💬 (arriba a la derecha)  ->  documentación: glosario y buscador
-    tab Asistente                     ->  resultados y sandbox
+UNA SOLA ENTRADA: EL TAB
+------------------------
+Hubo una versión con burbuja flotante además del tab. Se sacó: dos entradas a
+lo mismo obligaban a mantener la posición con CSS y a duplicar claves de
+widget, para un beneficio que no compensaba.
 
-El reparto no es sólo de gusto. La documentación es lo que se consulta EN
-CUALQUIER MOMENTO y de a ratos cortos ("¿qué era el bypass?"), y encima no
-depende de que haya corrida: es exactamente lo que tiene que estar a un click
-desde cualquier pantalla. Los otros dos necesitan una corrida y se leen con
-espacio, así que viven en el tab.
+Los cuerpos quedan como funciones separadas igual (`cuerpo_documentacion`,
+`cuerpo_resultados`, `cuerpo_sandbox`), que es lo que hace que el tab se lea de
+un vistazo y que agregar una cuarta sección sea trivial.
 
-Y hace que la burbuja sea BARATA: no toca el explicador ni el resumen de la
-corrida, así que se puede dibujar arriba de todo sin costo (ver
-`ui/asistente_popup.py`).
-
-Los tres cuerpos igual quedan acá, reutilizables, para que no haya dos
-versiones que se desincronicen. De ahí el parámetro `sufijo`: Streamlit exige
-claves de widget únicas, y si dos presentaciones dibujan el mismo botón con la
-misma clave, la app revienta. El sufijo distingue las claves — pero NO las
-historias de conversación, que se comparten a propósito.
+El parámetro `sufijo` sobrevive por lo mismo: Streamlit exige claves de widget
+únicas, así que si algún día un cuerpo se dibuja dos veces en la misma página,
+no revienta. Hoy siempre vale "tab".
 
 Integración en app.py:
 
-    from ui.tab_asistente import panel_asistente          # el tab
-    from ui.asistente_popup import asistente_flotante     # la burbuja
+    from ui.tab_asistente import panel_asistente
 
 OJO: se le pasa `resultados_fisicos` (STD), no la vista 9.300.
 """
@@ -66,7 +58,8 @@ except Exception as e:  # noqa: BLE001
     IA_IMPORTABLE = False
     ERROR_IA = f"{type(e).__name__}: {e}"
 
-# Las historias NO llevan sufijo: son compartidas entre el tab y la burbuja.
+# Las historias NO llevan sufijo: la conversación es una sola, aunque el
+# cuerpo se dibujara en más de un lugar.
 CLAVES_HISTORIA = {
     "docs": "asistente_hist_docs",
     "resultados": "asistente_hist_res",
@@ -93,17 +86,11 @@ def ia_disponible() -> bool:
 def _docs_crudos() -> str:
     """Los .md concatenados para el contexto de la IA.
 
-    Cacheado porque la burbuja se dibuja en TODOS los reruns de la app, y leer
-    y concatenar la carpeta entera en cada uno se nota. Se limpia con el mismo
-    botón de reindexar del buscador.
+    Cacheado porque leer y concatenar la carpeta entera en cada rerun se nota.
+    Se limpia con el mismo botón de reindexar del buscador.
     """
     docs, _ = cargar_docs()
     return docs
-
-
-def docs_para_ia() -> str:
-    """La documentación para el chat, o "" si no hay IA (así ni se lee)."""
-    return _docs_crudos() if ia_disponible() else ""
 
 
 def contexto_ia(resultados, serie, factor_mm) -> tuple[str, str]:
@@ -438,20 +425,20 @@ def _chat_agente(resultados, docs, resumen, factor_mm, sufijo):
 
 def panel_asistente(resultados: dict | None, params=None,
                     serie: dict | None = None, factor_mm: float = 1000.0):
-    """El asistente como tab: lectura de la corrida y guía del sandbox.
-
-    La documentación NO está acá: vive en la burbuja 💬, que está disponible en
-    todo momento. `resultados` FÍSICOS (STD) o None.
-    """
+    """El asistente como tab. `resultados` FÍSICOS (STD) o None."""
     st.subheader("Asistente")
     st.caption(
-        "Lectura automática de la corrida y guía del sandbox. Para el glosario "
-        "y el buscador de documentación, la burbuja 💬 de arriba a la derecha."
+        "Buscador de documentación, lectura automática de la corrida y guía "
+        "del sandbox. Todo local: no sale ningún dato del servidor."
         + ("" if ia_disponible() else " El chat con IA está desactivado."))
 
     docs, resumen = contexto_ia(resultados, serie, factor_mm)
 
-    tab_res, tab_sb = st.tabs(["📊 Resultados", "🛠️ Sandbox"])
+    tab_docs, tab_res, tab_sb = st.tabs(
+        ["📖 Documentación", "📊 Resultados", "🛠️ Sandbox"])
+
+    with tab_docs:
+        cuerpo_documentacion(docs, sufijo="tab")
 
     with tab_res:
         if not resultados:
