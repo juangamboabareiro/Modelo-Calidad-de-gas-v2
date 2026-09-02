@@ -75,6 +75,21 @@ def obtener_reglas(key: str) -> dict:
     return copiar_reglas(st.session_state.get(_clave(key)))
 
 
+def sembrar_reglas(key: str, reglas: dict | None) -> None:
+    """Pisa las reglas del bloque `key` y resetea sus widgets.
+
+    En la sidebar no hace falta: el bloque ES la fuente de verdad. La usa el
+    SANDBOX, donde la fuente de verdad es `PlantaConfig.correccion` y el
+    registro puede cambiar por fuera del editor — cargar un escenario, el
+    agente, el reset. Sin resetear los widgets, la tabla y el checkbox siguen
+    devolviendo lo que habia y lo escriben encima del escenario que el usuario
+    acaba de cargar (la misma trampa que documenta ui/sandbox_estado.py).
+    """
+    clave = _clave(key)
+    st.session_state[clave] = copiar_reglas(reglas)
+    _resetear_widgets(clave)
+
+
 def _fila_de(corte: str, modo) -> dict:
     """Modo interno -> fila de la tabla (etiqueta + valor)."""
     if isinstance(modo, int):

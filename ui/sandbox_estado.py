@@ -40,6 +40,7 @@ from ui.compat import ancho
 CLAVES_DATOS = (
     "registro_plantas",             # plantas_editor
     "cromas_extra_por_planta",      # plantas_editor (buffer del uploader)
+    "correccion_espejo_sandbox",    # plantas_editor (espejo del bloque 1b)
     "intervenciones_gasoductos",    # gasoductos_editor
     "sandbox_resultado",            # tab_plantas
     "sandbox_informe_ductos",       # tab_plantas
@@ -54,6 +55,19 @@ CLAVES_DATOS = (
 # OFICIAL, no algo que el usuario configuro. Borrarlo dejaria el bloque de
 # control y el impacto sin referencia hasta el proximo rerun del tab.
 
+# Claves que EXISTEN desde que el sandbox se abre por primera vez: que esten
+# no significa que el usuario haya tocado nada, asi que
+# `hay_algo_que_restablecer` las ignora.
+#
+# Antes esto era un slice posicional (`CLAVES_DATOS[2:]`), que se rompe en
+# silencio el dia que alguien inserta una clave nueva arriba en la tupla: el
+# boton de reset queda encendido siempre y deja de significar algo.
+CLAVES_DE_ARRANQUE = (
+    "registro_plantas",
+    "cromas_extra_por_planta",
+    "correccion_espejo_sandbox",
+)
+
 # Prefijos de las claves de WIDGET. Ver "LA TRAMPA DE LOS WIDGETS" arriba.
 PREFIJOS_WIDGETS = (
     # plantas_editor
@@ -66,6 +80,13 @@ PREFIJOS_WIDGETS = (
     "up_cromas", "btn_crear", "btn_borrar", "btn_guardar_reg", "btn_desc_reg",
     "btn_esc_load", "btn_esc_up", "btn_limpiar_cromas", "btn_correr_sandbox",
     "btn_bajar_sim",
+    # correccion_editor dibujado POR PLANTA del sandbox (bloque 1b).
+    #
+    # Tiene que ser `corr_sbx` y NO `corr_`: las reglas de la SIDEBAR viven en
+    # `corr_tbx` / `corr_dp` / `corr_mega` y son de la corrida OFICIAL.
+    # Barrerlas desde aca seria cambiar los numeros del tablero por apretar
+    # "Restablecer el sandbox".
+    "corr_sbx",
     # gasoductos_editor
     "gd_",
     # asistente_escenario: transcript, borrador y widgets del bot guiado
@@ -102,7 +123,8 @@ def restablecer() -> int:
 
 def hay_algo_que_restablecer() -> bool:
     """True si el usuario tocó algo. Sirve para no ofrecer un reset inútil."""
-    if any(c in st.session_state for c in CLAVES_DATOS[2:]):
+    if any(c in st.session_state
+           for c in CLAVES_DATOS if c not in CLAVES_DE_ARRANQUE):
         return True
 
     intervenciones = st.session_state.get("intervenciones_gasoductos") or []

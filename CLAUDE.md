@@ -80,6 +80,10 @@ pregunta, está en `docs/README.md`.
   las ampliaciones vigentes aplicadas**), no con `PARAMS` crudos. Si usara los
   crudos mientras la cascada oficial corrió con los efectivos, el control daría
   desvío sin haber bug.
+- Campo nuevo de `PlantaConfig` que el usuario pueda tocar → sumarlo a
+  `pipeline/plantas/serie_escenario.py` (a `_CAMPOS_ESCALARES` o a una rama
+  propia del diff), o el cambio se pierde en la **serie del escenario** sin
+  ningún error: cada mes re-siembra las base y aplica sólo el diff.
 
 ### De la UI
 
@@ -93,6 +97,15 @@ pregunta, está en `docs/README.md`.
   mecanismo de *flash* en `session_state`.
 - Nada de widgets que dependan de claves que el reset del sandbox no barre:
   los prefijos están en `ui/sandbox_estado.py`.
+- El bloque **1b (corrección por llenar evacuación) existe dos veces**: en la
+  sidebar para la corrida oficial (`corr_tbx` / `corr_dp` / `corr_mega`) y por
+  planta en el sandbox (`corr_sbx_<nombre>`). El reset del sandbox sólo puede
+  barrer las segundas — con el prefijo `corr_` a secas se llevaría puestos los
+  parámetros del tablero.
+- En el sandbox la fuente de verdad de la corrección es
+  `PlantaConfig.correccion`, no el `session_state` del bloque. Por eso
+  `_bloque_correccion` mantiene un espejo y re-siembra el editor cuando el
+  registro cambia por fuera (escenario, agente).
 
 ### Del asistente
 

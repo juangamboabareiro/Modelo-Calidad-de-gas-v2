@@ -23,7 +23,8 @@ La solucion es separar lo que el usuario TOCO de lo que heredo de la siembra:
 
 Asi, capacidad no tocada = sigue las ampliaciones del mes, como la serie
 oficial. Capacidad tocada = queda fija en lo que el usuario puso, porque eso
-es lo que pidio. `activa` de TTY-TBX es la excepcion: la manda la fecha de PM
+es lo que pidio. Lo mismo vale para las reglas de la correccion por llenar
+evacuacion: sin tocar siguen las de la sidebar, tocadas quedan como estan. `activa` de TTY-TBX es la excepcion: la manda la fecha de PM
 de cada mes, igual que en `inicializar`, que la fuerza en cada rerun.
 """
 
@@ -31,6 +32,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from pipeline.plantas.correccion import copiar_reglas
 from pipeline.plantas.registro import PlantaConfig, ConexionSalida, registro_base
 
 
@@ -78,6 +80,15 @@ def diff_contra_semilla(registro: dict, semilla_ref: dict) -> tuple[dict, list]:
         if _conexiones_a_lista(planta) != _conexiones_a_lista(semilla):
             cambios["conexiones"] = [c.a_dict() for c in planta.conexiones]
 
+        # Correccion por llenar evacuacion (el bloque 1b, que el sandbox ahora
+        # edita por planta). `copiar_reglas` normaliza los dos lados, asi que
+        # None y unas reglas apagadas comparan IGUAL: una base que el usuario
+        # no toco no genera override y el control "sandbox intacto == oficial"
+        # se mantiene.
+        if not _correcciones_iguales(planta, semilla):
+            cambios["correccion"] = (
+                copiar_reglas(planta.correccion) if planta.correccion else None)
+
         # Las cromatografias extra no son un parametro de la siembra: son datos
         # que el usuario cargo. Si hay, van siempre.
         if planta.cromas_extra:
@@ -109,6 +120,10 @@ def registro_para_periodo(params_del_mes, retenidos_rtp, compuestos,
                 planta.conexiones = [ConexionSalida.desde_dict(c) for c in valor]
             elif campo == "cromas_extra":
                 planta.cromas_extra = valor
+            elif campo == "correccion":
+                # Copia por mes: 24 meses compartiendo el mismo dict de reglas
+                # es la misma invitacion al bug que un registro compartido.
+                planta.correccion = copiar_reglas(valor) if valor else None
             else:
                 setattr(planta, campo, valor)
 
@@ -142,3 +157,10 @@ def _retenidos_iguales(a, b) -> bool:
 
 def _conexiones_a_lista(planta: PlantaConfig) -> list:
     return [c.a_dict() for c in planta.conexiones]
+
+
+def _correcciones_iguales(a, b) -> bool:
+    """`getattr` y no acceso directo: escenarios y tests viejos arman
+    PlantaConfig sin el campo `correccion`."""
+    return (copiar_reglas(getattr(a, "correccion", None))
+            == copiar_reglas(getattr(b, "correccion", None)))

@@ -2,12 +2,14 @@
 Panel de configuracion de plantas.
 ==================================
 
-Tres cosas, en tres expanders:
+Cuatro cosas, en cuatro expanders:
 
   1. Agregar / eliminar plantas.
   2. Editar la retencion por compuesto (el "esquema MEGA": un porcentaje por
      compuesto, sin correcciones piecewise).
-  3. Editar la logica de conexion: a que planta va el sobrante, en que
+  3. Editar la correccion de ingreso por llenar evacuacion: la seccion 1b de
+     la sidebar, pero POR PLANTA del sandbox (ver `_bloque_correccion`).
+  4. Editar la logica de conexion: a que planta va el sobrante, en que
      proporcion y con que tope.
 
 Mas la carga del archivo APARTE de cromatografias, que no toca `inputs.xlsx`.
@@ -43,11 +45,20 @@ from pipeline.plantas.registro import (
     cargar_registro,
     INFINITO,
 )
+from pipeline.plantas.correccion import copiar_reglas
+from ui.correccion_editor import bloque_correccion, sembrar_reglas
 from io_.cromatografias_planta import cargar_cromas_extra, resumen as resumen_cromas
 
 
 CLAVE = "registro_plantas"
 CLAVE_CROMAS = "cromas_extra_por_planta"
+
+# Espejo de lo que `_bloque_correccion` dejo escrito en el registro, por planta.
+# Sirve para detectar un cambio EXTERNO —cargar un escenario, el agente— y
+# resembrar el bloque. Sin esto los widgets de la correccion se quedan pegados
+# con lo ultimo que tipeo el usuario y le pisan el escenario que acaba de
+# cargar. Se limpia con el reset: esta en CLAVES_DATOS de ui/sandbox_estado.py.
+CLAVE_CORR_ESPEJO = "correccion_espejo_sandbox"
 
 # Scope del rerun. Cuando el editor corre adentro de un `st.fragment`, hay que
 # pedir `scope="fragment"` o Streamlit rerunea el script ENTERO y se pierde toda
@@ -177,6 +188,7 @@ def panel_plantas(retenidos_rtp, compuestos, config, tbx_en_servicio: bool,
 
     _bloque_general(planta, factor_mm)
     _bloque_retenidos(planta, compuestos)
+    _bloque_correccion(planta)
     _bloque_conexiones(planta, registro, factor_mm)
 
     errores, avisos = validar_registro(registro)
@@ -470,10 +482,10 @@ def _describir_preset(preset: str) -> str:
 def _bloque_retenidos(planta: PlantaConfig, compuestos):
     """Retención por compuesto, en %.
 
-    Es el esquema plano de MEGA: una fracción fija por compuesto, aplicada como
-    `gas_residual_OUT = gas_rico_IN * (1 - retenidos)`. TTY-DP y TTY-TBX además
-    recalculan coeficientes cuando se pasan del tope de tn/d; esa corrección
-    vive en TTY.py y no se toca desde acá.
+    Es el esquema plano: una fracción fija por compuesto, aplicada como
+    `gas_residual_OUT = gas_rico_IN * (1 - retenidos)`. Estos son los
+    coeficientes BASE; la corrección por llenar evacuación los escala según
+    sus reglas y se edita en el bloque de al lado (`_bloque_correccion`).
     """
     with st.expander(f"Retención por compuesto — {planta.nombre}"):
         st.caption(
@@ -519,6 +531,76 @@ def _bloque_retenidos(planta: PlantaConfig, compuestos):
                 if otra is not None:
                     planta.retenidos = otra.copy()
                     _rerun()
+
+
+def _corr_efectiva(reglas):
+    """Reglas sin ningun corte cargado -> None, o sea "sin correccion".
+
+    Importa para la serie del escenario: `diff_contra_semilla` compara el
+    registro contra la semilla, y un dict de adorno (`cortes: {}`) se leeria
+    como un cambio del usuario y se propagaria como override a los 24 meses.
+    Con esto, abrir el bloque y no cargar nada deja la planta igual que antes.
+    """
+    if not reglas or not reglas.get("cortes"):
+        return None
+    return copiar_reglas(reglas)
+
+
+def _bloque_correccion(planta: PlantaConfig):
+    """La seccion 1b de la sidebar, pero por planta del sandbox.
+
+    Hasta ahora la correccion solo se podia configurar para las TRES base y
+    desde la sidebar: una planta agregada en el sandbox nacia con
+    `correccion=None` y no habia forma de darle reglas, aunque
+    `modelar_planta` ya sabia aplicarlas.
+
+    QUIEN ES LA FUENTE DE VERDAD
+    ----------------------------
+    El registro, igual que en el canvas. `bloque_correccion` guarda su propia
+    copia en `session_state["corr_sbx_<planta>"]` para manejar sus widgets,
+    pero lo que vale es `planta.correccion`: el bloque se siembra desde ahi y
+    lo que devuelve se escribe de vuelta. Asi las reglas viajan solas en los
+    escenarios (`a_dict`), las ve el agente y las barre el reset.
+
+    OJO CON LAS CLAVES
+    ------------------
+    El prefijo es `sbx_` a proposito: las reglas de la SIDEBAR viven en
+    `corr_tbx` / `corr_dp` / `corr_mega` y son de la corrida OFICIAL. Si este
+    bloque compartiera clave con ellas, editar el sandbox cambiaria los
+    numeros del tablero.
+    """
+    espejo = st.session_state.setdefault(CLAVE_CORR_ESPEJO, {})
+    key = f"sbx_{planta.nombre}"
+    actual = _corr_efectiva(planta.correccion)
+
+    # Primera vez que se dibuja, o alguien toco el registro por fuera.
+    if planta.nombre not in espejo or espejo[planta.nombre] != actual:
+        sembrar_reglas(key, planta.correccion)
+
+    if planta.es_base:
+        st.caption(
+            "La corrección de abajo se heredó de **1b** en la barra lateral. "
+            "Lo que cambies acá vale sólo para el sandbox.")
+
+    reglas = bloque_correccion(
+        planta.nombre, key, reglas_iniciales=planta.correccion, rerun=_rerun)
+
+    efectiva = _corr_efectiva(reglas)
+    planta.correccion = efectiva
+    espejo[planta.nombre] = efectiva
+
+    # Con tope 0 la correccion usa la capacidad de evacuacion como limite; si
+    # ademas la capacidad es "sin limite", el LGN nunca la excede y la
+    # correccion no se dispara NUNCA. Solo puede pasar en el sandbox: en la
+    # sidebar la capacidad de evacuacion es un numero, no puede ser infinita.
+    if (efectiva and efectiva.get("aplicar") and not efectiva.get("tope")
+            and efectiva.get("solo_si_excede", True)
+            and planta.capacidad_evacuacion == INFINITO):
+        st.warning(
+            f"'{planta.nombre}' tiene la evacuación sin límite y el tope de la "
+            "corrección en 0 (= usar la evacuación): así no se va a aplicar "
+            "nunca. Poné un tope en tn/d, o una capacidad de evacuación, o "
+            "destildá «Solo si el LGN excede el tope».")
 
 
 def _bloque_conexiones(planta: PlantaConfig, registro, factor_mm):
