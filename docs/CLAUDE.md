@@ -25,6 +25,9 @@ temporal** (el pipeline corrido mes a mes).
 `docs/bitacora.md` es el diario de la migración: contexto histórico, con TODOs
 que pueden estar resueltos. **No es fuente de verdad.**
 
+El índice completo de la documentación, con qué documento responde qué
+pregunta, está en `docs/README.md`.
+
 ## Reglas que no se negocian
 
 1. **`vol_disponible = vol_asignado + vol_derivado + bypass`** por eslabón. Si

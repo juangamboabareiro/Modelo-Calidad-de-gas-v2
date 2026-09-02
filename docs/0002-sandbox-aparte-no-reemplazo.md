@@ -39,3 +39,14 @@ muestra el desvío.
 - El sandbox tiene que sembrarse con las capacidades *efectivas* (con las
   ampliaciones vigentes ya aplicadas). Con las crudas, el control daría desvío
   sin haber bug.
+
+## Cómo termina esta decisión
+
+Esta es una decisión **de transición**, no de arquitectura final. Su salida
+está en HALLAZGO-6: migrar `app.py` a la cascada genérica y borrar la
+implementación legacy. El día que eso pase, la duplicación desaparece y hay que
+escribir el ADR que reemplace a este.
+
+La señal de que ya se puede: que el control dé cero de forma estable durante
+varios períodos, y que `TestEquivalenciaCascadas` no haya saltado nunca. Hasta
+entonces, conviven a propósito.

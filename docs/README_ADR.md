@@ -25,7 +25,10 @@ NNNN-titulo-en-kebab-case.md
 2. **Se escribe cuando se decide**, no después. Un ADR reconstruido a posteriori
    pierde justo lo que vale: las alternativas que en su momento parecían
    razonables.
-3. **Si no hubo alternativa, no es un ADR.** Documentar "usamos pandas" no le
+3. **La fecha va en `AAAA-MM`**, no como nombre de versión. En un log
+   append-only el orden es información: "v2" no dice si algo se decidió antes o
+   después de otra cosa.
+4. **Si no hubo alternativa, no es un ADR.** Documentar "usamos pandas" no le
    sirve a nadie. Documentar "no unificamos traspaso y derivación aunque el
    código quedaría más corto" sí.
 
@@ -33,12 +36,15 @@ NNNN-titulo-en-kebab-case.md
 
 | # | Decisión | Estado |
 |---|---|---|
-| [0001](0001-cromatografia-por-ruta-con-fallback.md) | Cromatografía por `(Area, Gasoducto)` con fallback `Area+Sufijo` | Vigente |
+| [0001](0001-cromatografia-por-ruta-con-fallback.md) | Cromatografía por `(Area, Gasoducto)` con fallback `Area+Sufijo` | Vigente, con una etapa inactiva |
 | [0002](0002-sandbox-aparte-no-reemplazo.md) | El sandbox corre aparte, no reemplaza al pipeline | Vigente |
 | [0003](0003-traspaso-distinto-de-derivacion.md) | Traspaso y derivación son cosas distintas | Vigente |
 | [0004](0004-constantes-al-importar-y-reload.md) | Constantes leídas al importar, y el reload de `config` | Vigente, con deuda |
 | [0005](0005-intervenciones-redistribucion-proporcional.md) | Las intervenciones sobre ductos redistribuyen, no crean gas | Vigente |
 | [0006](0006-ruteo-por-hub.md) | El gas de un área con HUB entra por el hub | Vigente |
 | [0007](0007-replicar-el-excel-donde-hay-historico.md) | Replicar el Excel donde hay reportes ya emitidos | Vigente |
-| [0008](0008-sacar-calidad-de-gas.md) | Sacar calidad de gas de los productos del tablero | **A confirmar** |
+| [0008](0008-sacar-calidad-de-gas.md) | Sacar la calidad de gas del modelo | Vigente |
 | [0009](0009-asistente-hibrido-dos-capas.md) | El asistente en dos capas, la de abajo sin IA | Vigente |
+| [0010](0010-tabs-aislados.md) | Cada tab se renderiza aislado | Vigente |
+| [0011](0011-cromatografias-de-planta-fuera-del-excel.md) | Las cromatografías de planta van en un archivo aparte | Vigente |
+| [0012](0012-una-sola-puerta-al-proveedor-de-ia.md) | Una sola puerta al proveedor de IA | Vigente |

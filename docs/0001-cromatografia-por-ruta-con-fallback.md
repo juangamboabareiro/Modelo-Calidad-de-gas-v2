@@ -1,6 +1,6 @@
 # 0001 — Cromatografía por `(Area, Gasoducto)` con fallback `Area + Sufijo`
 
-- **Estado:** Vigente
+- **Estado:** Vigente, con una etapa inactiva
 - **Fecha:** 2026-07
 
 ## Contexto
@@ -39,3 +39,14 @@ Búsqueda en dos etapas:
   llene esa columna (HALLAZGO-5).
 - La clave concatenada se corta por el primer guion, lo que se rompe si un área
   llega a tener guion en el nombre. `validar_sufijos` lo chequea.
+
+## Decisión pendiente
+
+Si la columna de destino de las premisas no se va a llenar nunca, la primera
+etapa se puede borrar y esto queda en una sola búsqueda por `Area + Sufijo`.
+Eso **reemplazaría** este ADR, y hay que escribir el que lo reemplace: la
+desambiguación por sufijo seguiría siendo necesaria igual, así que el problema
+de Fortín de Piedra no vuelve.
+
+Mientras no se decida, la etapa por ruta queda como rama muerta que ningún test
+de datos reales puede cubrir.

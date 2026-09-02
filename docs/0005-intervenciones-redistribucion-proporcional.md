@@ -24,6 +24,16 @@ redistribución dentro del área, proporcional a como estaban los destinos.
 - **Caso sin salida.** Si un área inyecta *únicamente* al ducto que se da de
   baja, sus filas quedan como están y se reportan.
 
+### Sin definir: pedir más volumen del que hay
+
+Si al abrir un ducto se pide `V > T` —8 MMm³/d desde un área que inyecta 5— hay
+tres salidas posibles y **ninguna está decidida**: recortar a `T` con aviso,
+rechazar la intervención, o aceptarla y violar el invariante.
+
+Recortar con aviso es lo que más se parece al resto del sistema (avisar y
+seguir). Hasta que se decida, no confiar en el resultado de una intervención
+donde el volumen pedido se acerque al total del área.
+
 ## Alternativas descartadas
 
 - **Que el ducto nuevo sume volumen.** Rompe la comparación contra la corrida

@@ -34,3 +34,14 @@ conversión que se copiaron tal cual.
   tiene impacto, en `HALLAZGOS.md`. Un dato sucio replicado que nadie documentó
   es indistinguible de un bug.
 - El día que se corrija el dato de origen, se saca la replicación y punto.
+
+## Alcance: qué NO cubre esta decisión
+
+Esta decisión es sobre **cómo se calcula un número que el modelo reporta**, no
+sobre **qué reporta el modelo**.
+
+Que el Excel calculara algo no obliga a que el modelo lo siga calculando: por
+eso `decisiones/0008` puede sacar la calidad de gas sin contradecir a este ADR.
+Sacar una salida no cambia ningún número, así que el criterio de aceptación
+—"los números que el modelo sí reporta dan lo mismo que el Excel"— queda
+intacto.
