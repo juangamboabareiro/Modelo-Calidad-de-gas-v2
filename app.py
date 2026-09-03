@@ -1708,6 +1708,18 @@ _REF_9300 = 9_300.0
 # que `ui/mapa.py` la lee. Estan acá y no inline porque el bug que este bloque
 # arregla fue exactamente eso: dos lugares nombrando la misma tabla distinto.
 _COLS_RED_VISTA = {"origen", "destino", "valor"}
+
+# Las columnas que hacen falta para sacar el PCS de una fila de inyección.
+#
+# `resultados["tablas"]` NO es homogénea: además de las tablas por
+# (Area, Gasoducto) contiene "Propiedades gas de salida", que tiene PCS pero
+# cuya clave es (Corriente, Tipo). Cualquier recorrido de ese dict tiene que
+# chequear TODAS las columnas que va a usar, no una sola: preguntar sólo por
+# `PCS` deja entrar la tabla de propiedades y revienta con KeyError al pedirle
+# Area/Gasoducto. Ya pasó, y tumbó la app entera porque este bloque corre a
+# nivel de script, fuera de `_render_seguro`.
+_COLS_PCS_FILA = ["Area", "Gasoducto", "PCS"]
+
 UNIDAD_9300 = "MMm³/d de 9.300 kcal"
 UNIDAD_STD = "MMm³/d STD"
 
@@ -1735,9 +1747,17 @@ def construir_vista_9300(resultados: dict):
     avisos = []
 
     # Chequeo de escala con el PCS de las tablas.
+    #
+    # Se mira la MISMA población que después se usa para convertir: sólo las
+    # tablas por (Area, Gasoducto). La de propiedades por corriente también
+    # trae PCS, pero es otra población —una fila por corriente de salida, no
+    # por inyección— y meterla acá corría la mediana con la que se decide si
+    # los valores están en kcal/m³.
     _pcs_muestra = []
     for t in (resultados.get("tablas") or {}).values():
-        if t is not None and len(t) and "PCS" in t.columns:
+        if t is None or not len(t):
+            continue
+        if set(_COLS_PCS_FILA) <= set(getattr(t, "columns", ())):
             _pcs_muestra.append(t["PCS"].dropna())
     muestra = pd.concat(_pcs_muestra) if _pcs_muestra else pd.Series(dtype=float)
     if not len(muestra):
@@ -1851,8 +1871,13 @@ def construir_vista_9300(resultados: dict):
     if red is not None and len(red) and _COLS_RED_VISTA <= set(red.columns):
         pares = []
         for t in (resultados.get("tablas") or {}).values():
-            if t is not None and len(t) and "PCS" in getattr(t, "columns", ()):
-                pares.append(t[["Area", "Gasoducto", "PCS"]])
+            # El guard pide las TRES columnas, no sólo PCS: ver la nota de
+            # `_COLS_PCS_FILA`. "Propiedades gas de salida" tiene PCS pero su
+            # clave es (Corriente, Tipo), así que acá queda afuera.
+            if t is None or not len(t):
+                continue
+            if set(_COLS_PCS_FILA) <= set(getattr(t, "columns", ())):
+                pares.append(t[_COLS_PCS_FILA])
         if pares:
             lookup = (pd.concat(pares).dropna(subset=["PCS"])
                       .drop_duplicates(["Area", "Gasoducto"])
