@@ -130,14 +130,32 @@ def resumen_resultados(resultados: dict | None, factor_mm: float = 1000.0,
         "de la siguiente, NO sumar columnas entre plantas)"))
 
     def _mezcla():
+        # Solo los VOLUMENES. `mezcla_transporte` trae tambien `pcs` e `iw` de
+        # la composicion mezclada, y esos no viajan por la misma razon que la
+        # tabla de propiedades (ver la seccion "Calidad de gas" mas abajo):
+        # el tablero decidio no publicar calidad, asi que el asistente no la
+        # tiene para contestar con ella.
         m = resultados.get("mezcla_transporte") or {}
-        lineas = "".join(f"- {k}: {v}\n" for k, v in m.items())
-        return f"\n## Mezcla a sistema de transporte\n{lineas or '(sin datos)'}"
+        volumenes = {k: v for k, v in m.items() if k.startswith("vol_")}
+        lineas = "".join(f"- {k}: {v}\n" for k, v in volumenes.items())
+        return (f"\n## Mezcla a sistema de transporte (MMm3/d)\n"
+                f"{lineas or '(sin datos)'}")
     seccion("Mezcla a transporte", _mezcla)
 
-    seccion("Propiedades del gas de salida", lambda: _tabla_a_texto(
-        resultados.get("tablas", {}).get("Propiedades gas de salida"),
-        "Propiedades de las corrientes (z, densidad, PCS, IW)"))
+    # A PROPOSITO no se manda la tabla de propiedades por corriente, aunque
+    # exista en `resultados`. Trae PCS e IW, y el modelo dejo de REPORTAR
+    # calidad de gas (decisiones/0008): darsela lo invita a contestar
+    # preguntas de calidad con numeros que el tablero decidio no publicar,
+    # y que nunca se validaron contra una referencia. Lo que si se declara es
+    # para que se usa el PCS hoy, que es convertir unidades.
+    seccion("Calidad de gas", lambda: (
+        "\n## Calidad de gas\n"
+        "El modelo NO reporta calidad de gas: PCS e indice de Wobbe no son "
+        "salidas del tablero y no hay comparacion contra maximos (ver "
+        "decisiones/0008). Si el usuario pregunta por calidad, deci eso.\n"
+        "El PCS por fila SI se calcula, pero con un unico proposito: convertir "
+        "los volumenes a la vista de 9.300 kcal (V_9300 = V_STD x PCS / 9300). "
+        "Los numeros de este contexto estan en STD, sin convertir.\n"))
 
     def _hubs():
         info = resultados.get("info_hubs") or {}

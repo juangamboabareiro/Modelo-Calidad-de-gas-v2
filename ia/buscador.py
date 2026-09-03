@@ -184,12 +184,22 @@ GLOSARIO: dict[str, dict] = {
             "mirar. Si no da cero, ningun escenario armado encima vale."),
     },
     "MMm3/d de 9.300 kcal": {
-        "sinonimos": ["unidad", "std", "9300", "equivalente", "volumen"],
+        "sinonimos": ["unidad", "std", "9300", "equivalente", "volumen",
+                      "selector", "convertir"],
         "texto": (
             "Los volumenes se pueden ver en metros cubicos fisicos (STD) o en "
-            "equivalentes de energia de 9.300 kcal. Es un selector de "
-            "presentacion. Excepcion: el sandbox re-modela la fisica y "
-            "trabaja siempre en STD."),
+            "equivalentes de energia de 9.300 kcal. Es SOLO presentacion: el "
+            "modelo calcula la fisica en STD y la vista convierte con "
+            "V_9300 = V_STD x PCS / 9300, usando el PCS PROPIO de cada "
+            "corriente (el de la fila en las tablas, el del gas rico del pool "
+            "en los flujos de planta). Lo que no es volumen de gas — LGN en "
+            "tn/d, retenidos, cromatografias, capacidad de evacuacion — no se "
+            "toca.\n\n"
+            "DOS TRAMPAS. Una: una fila sin PCS cargado queda SIN convertir, "
+            "mezclada con las convertidas en la misma tabla; se avisa, pero "
+            "un numero comparado contra otro en distinta base no significa "
+            "nada. Otra: el sandbox re-modela la fisica y trabaja siempre en "
+            "STD, sin importar el selector."),
     },
     "Ampliaciones y PM": {
         "sinonimos": ["ampliacion", "mantenimiento", "parada", "pre-pm", "post-pm"],
@@ -199,18 +209,24 @@ GLOSARIO: dict[str, dict] = {
             "antes de esa fecha TTY-TBX esta fuera de servicio y el pool de "
             "TTY va directo a Dew Point."),
     },
-    # Se conserva a proposito, aunque el modelo ya no lo calcule: quien viene
-    # del Excel lo va a buscar, y una respuesta clara vale mas que un "sin
-    # resultados" que lo deje pensando que se rompio algo.
-    "PCS / Indice de Wobbe (ya no se calculan)": {
+    # Este es el termino mas facil de contestar mal, porque la respuesta tiene
+    # dos mitades que se contradicen si se dice solo una. El modelo NO reporta
+    # calidad de gas (decisiones/0008), pero el PCS por fila es la carga
+    # estructural de la vista 9.300: sin el, el selector de unidades no puede
+    # convertir. Decir solo "ya no se calcula" deja a alguien mirando un
+    # selector que dice "9.300 kcal" convencido de que esta roto.
+    "PCS / Indice de Wobbe": {
         "sinonimos": ["pcs", "iw", "wobbe", "calidad", "poder calorifico", "kcal"],
         "texto": (
-            "OJO: el modelo YA NO calcula calidad de gas. No hay poder "
-            "calorifico ni indice de Wobbe entre sus salidas (ver "
-            "decisiones/0008). La tabla de propiedades por compuesto sigue "
-            "siendo un input obligatorio, pero para el calculo de retenidos: "
-            "se usa el peso molecular para pasar de fraccion molar a "
-            "toneladas por dia."),
+            "El modelo NO reporta calidad de gas: PCS e indice de Wobbe no "
+            "son salidas del tablero, no hay comparacion contra maximos ni "
+            "graficos de calidad (ver decisiones/0008, que explica por que: "
+            "nunca hubo una referencia para validarlos). PERO el PCS de cada "
+            "fila SI se calcula, porque es lo que convierte los volumenes a "
+            "la vista de 9.300 kcal: V_9300 = V_STD x PCS / 9300. Y la hoja "
+            "de propiedades por compuesto sigue siendo un input obligatorio, "
+            "porque los retenidos usan el peso molecular para pasar de "
+            "fraccion molar a toneladas por dia."),
     },
 }
 

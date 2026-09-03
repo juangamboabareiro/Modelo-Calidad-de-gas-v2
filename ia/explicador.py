@@ -14,12 +14,6 @@ Cada regla devuelve un `Hallazgo`:
     detalle el porque, con los numeros a la vista
     donde   en que tab del tablero mirarlo
 
-OJO CON `donde`: se imprime tal cual ("Donde mirarlo: tab X") y NADIE lo
-valida contra los tabs que existen. Si se saca o se renombra un tab hay que
-grepear este archivo, o el explicador manda a la gente a un tab fantasma.
-Ya paso: las reglas de TBX y de derivaciones apuntaban al tab "Cascada"
-despues de que se eliminara.
-
 Agregar una regla nueva = una funcion que reciba el contexto y devuelva
 Hallazgos, sumada a `_REGLAS`. Nada mas.
 """
@@ -115,12 +109,12 @@ def _r_tbx(ctx: Contexto) -> list[Hallazgo]:
             "El pool de TTY entra primero por TTY-TBX y lo que sobra pasa a "
             "TTY-Dew Point. Es la configuracion posterior a la parada de "
             "mantenimiento.",
-            "Resumen")]
+            "Cascada")]
     return [Hallazgo(
         "info", "TTY-TBX fuera de servicio (pre-PM)",
         "Antes de la parada de mantenimiento, el pool de TTY va directo a "
         "TTY-Dew Point: TBX no trata nada en este periodo.",
-        "Resumen")]
+        "Cascada")]
 
 
 def _r_capacidad(ctx: Contexto) -> list[Hallazgo]:
@@ -137,7 +131,7 @@ def _r_capacidad(ctx: Contexto) -> list[Hallazgo]:
             hallazgos.append(Hallazgo(
                 "info", f"{planta}: fuera de servicio",
                 "No esta activa en esta corrida, asi que no trata gas.",
-                "Resumen > Reparto del gas"))
+                "Reparto del gas"))
             continue
 
         maximo = float(fila.get("vol_maximo") or 0)
@@ -152,13 +146,13 @@ def _r_capacidad(ctx: Contexto) -> list[Hallazgo]:
                 f"Trata {asignado:,.2f} de un maximo de {maximo:,.2f} MMm3/d "
                 f"({uso:.0%}). Todo el gas que le llegue de mas no lo puede "
                 "procesar: se deriva o pasa de largo.",
-                "Resumen > Reparto del gas"))
+                "Reparto del gas"))
         elif uso <= UMBRAL_OCIOSA:
             hallazgos.append(Hallazgo(
                 "info", f"{planta}: con capacidad de sobra",
                 f"Trata {asignado:,.2f} de {maximo:,.2f} MMm3/d ({uso:.0%}): "
                 "tiene margen para recibir mas gas.",
-                "Resumen > Reparto del gas"))
+                "Reparto del gas"))
 
         bypass = float(fila.get("bypass") or 0)
         if bypass > UMBRAL_BYPASS:
@@ -167,7 +161,7 @@ def _r_capacidad(ctx: Contexto) -> list[Hallazgo]:
                 "Ese gas llega a la planta pero pasa de largo sin tratarse "
                 "(limite de proceso o de evacuacion). No va a otra planta: "
                 "sigue de largo tal como esta.",
-                "Resumen > Reparto del gas"))
+                "Reparto del gas"))
 
         derivado = float(fila.get("vol_derivado") or 0)
         if derivado > 0:
@@ -176,7 +170,7 @@ def _r_capacidad(ctx: Contexto) -> list[Hallazgo]:
                 "Es el sobrante que le pasa a la planta siguiente de la "
                 "cascada. Ese volumen es el vol_disponible de la que sigue, "
                 "asi que no hay que sumar la columna entre plantas.",
-                "Resumen > Reparto del gas"))
+                "Cascada"))
 
     return hallazgos
 
@@ -202,6 +196,53 @@ def _r_mezcla(ctx: Contexto) -> list[Hallazgo]:
         "info", f"Inyeccion a transporte: {total:,.2f} MMm3/d",
         f"Se compone de: {partes}.",
         "Graphs")]
+
+
+def _r_pcs_faltante(ctx: Contexto) -> list[Hallazgo]:
+    """Filas con volumen y sin PCS: mezclan unidades en la vista 9.300.
+
+    Por que existe esta regla. La conversion a 9.300 usa el PCS de cada fila
+    (V_9300 = V_STD x PCS / 9300). Una fila sin PCS queda SIN convertir y
+    conviviendo con las convertidas en la misma tabla. `construir_vista_9300`
+    lo avisa, pero por la sidebar, que es donde nadie mira: un warning ahi
+    compite con los mensajes de carga del Excel y se pierde.
+
+    Y el efecto es del tipo peor: no hay error, no hay hueco, hay un numero con
+    cara de numero en la unidad equivocada. Se detecta desde los resultados
+    FISICOS, sin depender de que app.py pase sus avisos.
+
+    Ojo con lo que esta regla NO dice: nada de calidad de gas. El modelo dejo
+    de reportar PCS e IW como salida (decisiones/0008); lo que se mira aca es
+    la CONSISTENCIA DE UNIDADES, que es otra cosa y sigue viva.
+    """
+    tablas = ctx.resultados.get("tablas") or {}
+    afectadas = []
+    for nombre, t in tablas.items():
+        if t is None or not isinstance(t, pd.DataFrame) or not len(t):
+            continue
+        if "Volumen_inyectado" not in t.columns:
+            continue
+        if "PCS" not in t.columns:
+            afectadas.append((nombre, len(t), len(t)))
+            continue
+        sin = t["PCS"].isna() & t["Volumen_inyectado"].notna()
+        if sin.any():
+            afectadas.append((nombre, int(sin.sum()), len(t)))
+
+    if not afectadas:
+        return []
+
+    detalle = "; ".join(f"{nombre}: {n} de {total} filas"
+                        for nombre, n, total in afectadas)
+    return [Hallazgo(
+        "atencion", "Filas con volumen y sin PCS cargado",
+        f"{detalle}. Con el selector en MMm3/d de 9.300 kcal esas filas "
+        "quedan SIN convertir, mezcladas con las convertidas en la misma "
+        "tabla: no da error, da un numero en la unidad equivocada. Si vas a "
+        "comparar volumenes fila por fila, pasa el selector a STD. Ademas, "
+        "una fila sin cromatografia aporta gas y cero LGN, asi que baja el "
+        "lgn_unitario del pool.",
+        "Tablas totales")]
 
 
 def _r_hubs(ctx: Contexto) -> list[Hallazgo]:
@@ -238,7 +279,7 @@ def _r_diagnostico(ctx: Contexto) -> list[Hallazgo]:
 
 
 _REGLAS = (_r_balance, _r_diagnostico, _r_tbx, _r_capacidad,
-           _r_mezcla, _r_hubs)
+           _r_mezcla, _r_pcs_faltante, _r_hubs)
 
 _ORDEN_NIVEL = {"problema": 0, "atencion": 1, "ok": 2, "info": 3}
 
@@ -287,5 +328,7 @@ PREGUNTAS = {
         lambda hs: [h for h in hs if "transporte" in h.titulo],
     "¿Hay problemas con los datos de entrada?":
         lambda hs: [h for h in hs if "observaci" in h.titulo
-                    or "HUB" in h.titulo],
+                    or "HUB" in h.titulo or "PCS" in h.titulo],
+    "¿Puedo confiar en las unidades de lo que veo?":
+        lambda hs: [h for h in hs if "PCS" in h.titulo],
 }

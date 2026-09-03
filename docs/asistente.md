@@ -75,12 +75,38 @@ el buscador.
 Una lista de reglas, cada una con su umbral y su texto. Devuelve `Hallazgo`s con
 nivel (`problema`/`atencion`/`ok`/`info`), título, detalle con los números a la
 vista y **en qué tab mirarlo**. Hoy cubre: balance, estado de TBX, saturación y
-bypass por planta, derivaciones, volumen a sistema de transporte, HUBs sin
-reparto y el panel de calidad de datos.
+bypass por planta, derivaciones, volumen a sistema de transporte, **filas sin
+PCS**, HUBs sin reparto y el panel de calidad de datos.
+
+La regla de **filas sin PCS** merece una nota, porque es el tipo de aviso que
+justifica que exista el explicador. Una fila sin PCS queda sin convertir en la
+vista 9.300, conviviendo con las convertidas en la misma tabla: no da error, da
+un número con cara de número en la unidad equivocada. `construir_vista_9300` lo
+avisa, pero por la sidebar, donde compite con los mensajes de carga del Excel y
+se pierde. La regla lo detecta desde los resultados físicos, sin depender de
+que `app.py` le pase sus avisos.
 
 Los umbrales están todos juntos arriba del archivo. Agregar una regla es una
 función que reciba el contexto y devuelva `Hallazgo`s, sumada a `_REGLAS`; si una
 regla falla, se reporta esa y las demás siguen.
+
+### Qué NO se le manda al modelo
+
+`resumen_resultados` omite a propósito dos cosas que **sí** están en
+`resultados`:
+
+- la tabla **Propiedades gas de salida** (z, densidad, PCS, IW por corriente);
+- las claves `pcs` e `iw` de **`mezcla_transporte`**.
+
+El motivo: el tablero decidió no publicar calidad de gas
+(`decisiones/0008`), entre otras cosas porque esos números nunca se validaron
+contra una referencia. Si viajaran en el contexto, el modelo contestaría
+preguntas de calidad con ellos — con total fluidez y sin que nada avisara que
+son cifras que el proyecto retiró. En su lugar va una sección corta que dice
+que la calidad no es una salida y para qué se usa el PCS hoy.
+
+Es el caso general de una regla que conviene tener presente: **lo que no le
+mandás es tan parte del diseño como lo que le mandás.**
 
 ### Capa IA
 
