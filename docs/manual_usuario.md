@@ -82,12 +82,13 @@ LGN (tn/d). Dos cosas para leerla bien:
 Acá también aparece el **desvío de balance**: en verde si es prácticamente
 cero. Si no lo está, el resultado no es confiable y no hay que usarlo.
 
+La **forma de la cascada** se lee en esta misma tabla: `vol_derivado` es lo que
+cada planta le pasa a la siguiente y `bypass` lo que pasa de largo sin tratarse.
+Si la fecha de PM cae después del período, TTY-TBX está fuera de servicio y el
+pool TTY entra directo a Dew Point — se ve en que TBX no trata nada. Planta por
+planta, con las entradas y salidas dibujadas, está en **Esquemas de planta**.
+
 Cada tabla tiene su botón de descarga a CSV.
-
-### Cascada
-
-El diagrama de la cascada para el período corrido. Cambia según la fecha de PM:
-pre-PM el pool entra directo a Dew Point; post-PM entra por TBX.
 
 ### Graphs
 

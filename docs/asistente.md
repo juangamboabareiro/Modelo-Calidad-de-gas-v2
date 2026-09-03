@@ -206,5 +206,9 @@ corporativo o a un modelo local (Ollama), se toca ese archivo y nada más.
   estás editando en caliente).
 - Término que confunde a los nuevos → sumalo al `GLOSARIO`.
 - Situación que se repite en las corridas → hacela una regla del explicador.
+- **Tab que se saca o se renombra → grepear `explicador.py`.** El campo `donde`
+  de cada `Hallazgo` se imprime tal cual ("Dónde mirarlo: tab X") y no lo valida
+  nada: al eliminar el tab *Cascada*, dos reglas quedaron mandando a un tab que
+  ya no existía.
 - Herramienta nueva para el agente → esquema en `ESQUEMAS` + método homónimo en
   `Ejecutor`.
