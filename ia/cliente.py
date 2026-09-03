@@ -1,160 +1,206 @@
 """
-Cliente de la API de Anthropic: la UNICA puerta de salida a la IA.
-==================================================================
+Cliente de IA: elige el proveedor y expone UNA interfaz al resto del codigo.
+============================================================================
 
-Todo lo que llame a la API pasa por aca. Si manana cambia el proveedor, el
-modelo o la forma de autenticar, se toca este archivo y nada mas.
+Nadie fuera de `ia/` sabe con quien estamos hablando. `ia/proveedores.py` sabe
+hablar con cada API; este modulo decide cual y normaliza lo que devuelven.
 
-Configuracion (en orden de prioridad):
+CONFIGURACION (`.streamlit/secrets.toml` o variables de entorno)
+----------------------------------------------------------------
+    ANTHROPIC_API_KEY = "sk-ant-..."     # si esta, se usa Anthropic
+    GEMINI_API_KEY    = "AIza..."        # si esta, se usa Gemini
 
-  1. `st.secrets["ANTHROPIC_API_KEY"]`  -> .streamlit/secrets.toml (deploy)
-  2. variable de entorno ANTHROPIC_API_KEY (desarrollo local)
+    ASISTENTE_PROVEEDOR = "gemini"       # opcional: forzar uno de los dos
+    ASISTENTE_MODELO    = "..."          # opcional: pisar el modelo
+    ASISTENTE_BOTS      = "docs"         # opcional: que bots tienen IA
 
-El modelo se puede pisar con `ASISTENTE_MODELO` (secreto o entorno).
+Sin ninguna key, la capa de IA queda apagada y el asistente funciona igual con
+el buscador y el explicador.
 
-PROMPT CACHING
---------------
-El asistente manda la documentacion entera en CADA pregunta. Sin caching eso
-se paga a precio de input completo todas las veces; con caching, la segunda
-pregunta en adelante lo lee a 1/10 del precio.
+EL INTERRUPTOR POR BOT (`ASISTENTE_BOTS`)
+-----------------------------------------
+Los tres bots no mandan lo mismo:
 
-Por eso `system` NO es un string sino una LISTA de bloques, ordenados de mas
-estable a mas volatil, con el punto de corte del cache al final de lo estable:
+    docs       -> la documentacion del proyecto
+    resultados -> la documentacion + los NUMEROS de la corrida
+    agente     -> lo mismo, y ademas opera el sandbox
 
-    [0] documentacion            <- cache_control, identico en los tres bots
-    [1] instrucciones del bot    <- corto, cambia por bot
-    [2] resultados de la corrida <- cambia en cada corrida
+Con una key de tier gratuito de Gemini, lo que se envia **puede usarse para
+entrenar y ser visto por revisores humanos**, y Google pide explicitamente no
+mandar informacion confidencial a los servicios no pagos. Por eso el DEFAULT
+con Gemini es `docs` solamente: es una decision de politica de datos, no una
+limitacion tecnica.
 
-El prefijo se arma en orden `tools -> system -> messages`, asi que todo lo que
-esta antes del corte entra al cache. Como el bloque [0] es identico para los
-tres bots, comparten la misma entrada (salvo el agente, que ademas lleva
-`tools` adelante y por eso escribe la suya).
+Para habilitar el resto hay que decirlo:
 
-Un bloque tiene que superar el minimo del modelo para que el cache se active
-(1.024 tokens en Sonnet 5). La documentacion del proyecto lo supera holgado;
-si algun dia quedara por debajo, la API no da error, simplemente no cachea.
+    ASISTENTE_BOTS = "docs,resultados,agente"
 
-Requiere `anthropic` en requirements.txt.
+Con Anthropic el default son los tres, porque la API de pago no entrena con lo
+que se le manda. Igual conviene validarlo con seguridad de la informacion antes
+de usarlo con datos reales: la politica de la empresa manda sobre este archivo.
 """
 
 from __future__ import annotations
 
-import os
+from ia.proveedores import PROVEEDORES, Anthropic, Gemini, SinAPIKey, leer_secreto
 
-MODELO_DEFAULT = "claude-sonnet-5"
-
-# Tope de tokens de salida por respuesta. 4096 alcanza para cualquier
-# explicacion; el agente usa respuestas cortas entre herramientas.
 MAX_TOKENS = 4096
 
-# Precios en USD por millon de tokens. Solo para el cartelito de costo de la
-# UI: es una ESTIMACION, la fuente de verdad es la consola de Anthropic.
-# Si cambias de modelo, actualiza esto o el numero va a mentir.
-PRECIOS = {
-    "claude-sonnet-5": {"in": 2.0, "out": 10.0, "cache_write": 2.5, "cache_read": 0.20},
-    "claude-opus-5": {"in": 5.0, "out": 25.0, "cache_write": 6.25, "cache_read": 0.50},
-    "claude-haiku-4-5-20251001": {"in": 1.0, "out": 5.0, "cache_write": 1.25, "cache_read": 0.10},
-}
+BOTS = ("docs", "resultados", "agente")
+
+# Que bots llevan IA si nadie configuro `ASISTENTE_BOTS`. Ver el encabezado:
+# con Gemini gratis, solo el que no manda numeros de produccion.
+BOTS_DEFAULT = {"anthropic": BOTS, "gemini": ("docs",)}
+
+__all__ = ["SinAPIKey", "hay_credencial", "modelo_configurado", "proveedor",
+           "explicar_error",
+           "etiqueta_proveedor", "bot_habilitado", "bots_habilitados",
+           "stream_texto", "correr_agente", "leer_uso", "resumen_uso",
+           "costo_estimado", "aviso_datos"]
 
 
-class SinAPIKey(RuntimeError):
-    """No hay credencial configurada. La UI la atrapa y muestra el como."""
+# ===========================================================================
+# Que proveedor
+# ===========================================================================
 
+def proveedor():
+    """La clase del proveedor en uso, o None si no hay credencial.
 
-def _leer_secreto(nombre: str) -> str | None:
-    """Busca en st.secrets primero, en el entorno despues.
-
-    El import de streamlit va adentro para que este modulo se pueda usar sin
-    streamlit (por ejemplo desde `tools/probar_asistente.py`), y el acceso a
-    `st.secrets` va en try porque levanta si no existe ningun secrets.toml.
+    Si estan las dos keys y nadie eligio, gana Anthropic: es la que no entrena
+    con lo que se le manda, o sea el default mas conservador.
     """
-    try:
-        import streamlit as st
-        valor = st.secrets.get(nombre)  # type: ignore[attr-defined]
-        if valor:
-            return str(valor)
-    except Exception:
-        pass
-    return os.environ.get(nombre) or None
+    forzado = (leer_secreto("ASISTENTE_PROVEEDOR") or "").strip().lower()
+    if forzado in PROVEEDORES:
+        p = PROVEEDORES[forzado]
+        return p if p.hay_credencial() else None
+
+    for p in (Anthropic, Gemini):
+        if p.hay_credencial():
+            return p
+    return None
 
 
 def hay_credencial() -> bool:
-    return _leer_secreto("ANTHROPIC_API_KEY") is not None
+    return proveedor() is not None
+
+
+def etiqueta_proveedor() -> str:
+    p = proveedor()
+    return p.etiqueta if p else "(sin proveedor)"
 
 
 def modelo_configurado() -> str:
-    return _leer_secreto("ASISTENTE_MODELO") or MODELO_DEFAULT
+    p = proveedor()
+    if p is None:
+        return "(sin modelo)"
+    return leer_secreto("ASISTENTE_MODELO") or p.modelo_default
 
 
-def obtener_cliente():
-    """Devuelve el cliente de la SDK, o levanta con un mensaje accionable."""
-    try:
-        import anthropic
-    except ImportError as e:
-        raise RuntimeError(
-            "Falta la SDK: agrega `anthropic` a requirements.txt "
-            "(`pip install anthropic`) y redeploya."
-        ) from e
+def es_gemini_gratis() -> bool:
+    """Heurística: Gemini con una key sin billing es tier gratuito.
 
-    key = _leer_secreto("ANTHROPIC_API_KEY")
-    if not key:
-        raise SinAPIKey(
-            "No hay ANTHROPIC_API_KEY. Cargala en `.streamlit/secrets.toml` "
-            '(`ANTHROPIC_API_KEY = "sk-ant-..."`) o como variable de entorno.'
-        )
-    return anthropic.Anthropic(api_key=key)
+    No hay forma de saberlo desde la API, así que se asume lo más cauto: si el
+    proveedor es Gemini, se avisa de los términos del tier gratuito salvo que
+    el usuario declare `GEMINI_TIER_PAGO = true`.
+    """
+    if proveedor() is not Gemini:
+        return False
+    return not (leer_secreto("GEMINI_TIER_PAGO") or "").strip().lower() \
+        in ("1", "true", "si", "sí", "yes")
+
+
+def aviso_datos() -> str:
+    """La línea que la UI muestra sobre qué pasa con lo que se envía."""
+    p = proveedor()
+    if p is None:
+        return ""
+    if p is Gemini and es_gemini_gratis():
+        return ("⚠️ Gemini en tier **gratuito**: lo que enviés puede usarse "
+                "para entrenar sus modelos y ser revisado por personas. No "
+                "mandes nada confidencial.")
+    return (f"Lo que preguntes y el contexto viajan a la API de {p.etiqueta}.")
+
+
+# ===========================================================================
+# Que bots
+# ===========================================================================
+
+def bots_habilitados() -> tuple[str, ...]:
+    p = proveedor()
+    if p is None:
+        return ()
+    crudo = leer_secreto("ASISTENTE_BOTS")
+    if not crudo:
+        # El default de Gemini se limita por los términos del tier GRATUITO. Si
+        # el usuario declaró que su key es de pago, esa razón desaparece y
+        # valen los tres, igual que con Anthropic.
+        if p is Gemini and not es_gemini_gratis():
+            return BOTS
+        return BOTS_DEFAULT.get(p.nombre, BOTS)
+    if crudo.strip().lower() in ("todos", "all", "*"):
+        return BOTS
+    pedidos = {b.strip().lower() for b in crudo.split(",")}
+    return tuple(b for b in BOTS if b in pedidos)
+
+
+def bot_habilitado(bot: str) -> bool:
+    return bot in bots_habilitados()
+
+
+def motivo_bot_apagado(bot: str) -> str:
+    """Por qué este bot no tiene IA, en una línea para la UI."""
+    if not hay_credencial():
+        return ""
+    if bot_habilitado(bot):
+        return ""
+    if proveedor() is Gemini and es_gemini_gratis() and bot != "docs":
+        return ("Apagado a propósito: este bot enviaría **números de la "
+                "corrida**, y el tier gratuito de Gemini puede usar lo que "
+                "recibe para entrenar. Si tu key es de pago, declaralo con "
+                "`GEMINI_TIER_PAGO = true`. Para habilitarlo igual, "
+                '`ASISTENTE_BOTS = "docs,resultados,agente"`.')
+    return ('No está en `ASISTENTE_BOTS`. Para habilitarlo, agregalo: '
+            '`ASISTENTE_BOTS = "docs,resultados,agente"`.')
 
 
 # ===========================================================================
 # Uso y costo
 # ===========================================================================
 
-def leer_uso(usage) -> dict:
-    """Normaliza el `usage` de la respuesta a un dict plano.
-
-    Los cuatro numeros que importan:
-      entrada        tokens NUEVOS (los que van despues del corte del cache)
-      cache_escrito  tokens que se guardaron en el cache (se pagan 1.25x)
-      cache_leido    tokens que vinieron del cache (se pagan 0.1x)
-      salida         tokens generados
-    """
-    if usage is None:
-        return {}
-    g = (lambda n: int(getattr(usage, n, 0) or 0))
-    return {
-        "entrada": g("input_tokens"),
-        "cache_escrito": g("cache_creation_input_tokens"),
-        "cache_leido": g("cache_read_input_tokens"),
-        "salida": g("output_tokens"),
-    }
+def leer_uso(uso) -> dict:
+    """Normaliza el uso que ya viene normalizado por el adaptador."""
+    return dict(uso or {})
 
 
 def costo_estimado(uso: dict, modelo: str | None = None) -> float | None:
-    """USD aproximados de una llamada. None si no conocemos el precio."""
-    precios = PRECIOS.get(modelo or modelo_configurado())
-    if not precios or not uso:
+    """USD aproximados. None si no conocemos el precio (o si es gratis)."""
+    p = proveedor()
+    if p is None or not uso:
         return None
-    return (
-        uso.get("entrada", 0) * precios["in"]
-        + uso.get("cache_escrito", 0) * precios["cache_write"]
-        + uso.get("cache_leido", 0) * precios["cache_read"]
-        + uso.get("salida", 0) * precios["out"]
-    ) / 1_000_000
+    precios = p.precios.get(modelo or modelo_configurado())
+    if not precios:
+        return None
+    return (uso.get("entrada", 0) * precios["in"]
+            + uso.get("cache_escrito", 0) * precios["cache_write"]
+            + uso.get("cache_leido", 0) * precios["cache_read"]
+            + uso.get("salida", 0) * precios["out"]) / 1_000_000
 
 
 def resumen_uso(uso: dict, modelo: str | None = None) -> str:
-    """Una linea para el pie de la respuesta en la UI."""
+    """Una línea para el pie de la respuesta en la UI."""
     if not uso:
         return ""
-    costo = costo_estimado(uso, modelo)
     partes = [f"{uso.get('entrada', 0):,} in", f"{uso.get('salida', 0):,} out"]
     if uso.get("cache_leido"):
         partes.append(f"{uso['cache_leido']:,} desde caché")
     elif uso.get("cache_escrito"):
         partes.append(f"{uso['cache_escrito']:,} escritos al caché")
     texto = " · ".join(partes)
+    costo = costo_estimado(uso, modelo)
     if costo is not None:
         texto += f" · ~US$ {costo:.4f}"
+    elif proveedor() is Gemini and es_gemini_gratis():
+        texto += " · sin costo (tier gratuito)"
     return texto
 
 
@@ -162,49 +208,77 @@ def resumen_uso(uso: dict, modelo: str | None = None) -> str:
 # Llamadas
 # ===========================================================================
 
-def stream_texto(system: list[dict] | str, messages: list[dict],
-                 max_tokens: int = MAX_TOKENS, registro_uso: dict | None = None):
+def explicar_error(e: Exception) -> str:
+    """Traduce un error de la API a algo accionable para el usuario.
+
+    Los tres que aparecen de verdad, en orden de frecuencia con Gemini gratis:
+    rate limit, modelo inexistente y credencial mala. Sin esto la UI muestra el
+    repr de una excepcion de la SDK, que no le dice nada a nadie.
+    """
+    texto = str(e)
+    bajo = texto.lower()
+
+    if "429" in texto or "resource_exhausted" in bajo or "quota" in bajo \
+            or "rate limit" in bajo:
+        extra = ""
+        if proveedor() is Gemini and es_gemini_gratis():
+            extra = (" El tier gratuito permite pocas llamadas por minuto y un "
+                     "turno del agente son varias seguidas, así que es fácil "
+                     "chocarlo. Esperá un minuto y pedile UN cambio por vez, o "
+                     "habilitá billing para subir el límite.")
+        return f"Llegaste al límite de llamadas por minuto.{extra}"
+
+    if "404" in texto or "not found" in bajo:
+        return (f"El modelo `{modelo_configurado()}` no existe o tu key no lo "
+                "tiene habilitado. Corré `python tools/probar_asistente.py "
+                "--modelos` para ver los disponibles y fijá uno con "
+                "`ASISTENTE_MODELO` en los secretos.")
+
+    if "401" in texto or "403" in texto or "api key" in bajo \
+            or "permission" in bajo:
+        return ("La credencial fue rechazada. Revisá que la key esté completa "
+                "y sin espacios en `secrets.toml`.")
+
+    if "safety" in bajo or "blocked" in bajo:
+        return ("El proveedor bloqueó la respuesta por sus filtros de "
+                "contenido. Reformulá el pedido.")
+
+    return f"{type(e).__name__}: {texto}"
+
+
+def _proveedor_o_error():
+    p = proveedor()
+    if p is None:
+        raise SinAPIKey(
+            "No hay credencial de IA. Cargá ANTHROPIC_API_KEY o "
+            "GEMINI_API_KEY en `.streamlit/secrets.toml`.")
+    return p
+
+
+def stream_texto(system, mensajes: list[dict], max_tokens: int = MAX_TOKENS,
+                 registro_uso: dict | None = None):
     """Generador de texto para `st.write_stream`. Para los bots SIN tools.
 
-    `system` es la lista de bloques (ver el encabezado del modulo); se acepta
-    un string suelto para no romper llamadas viejas.
-
-    `registro_uso`, si se pasa, se rellena con el uso de la llamada cuando
-    termina el stream. Es un dict de salida y no un valor de retorno porque un
-    generador ya usa el `return` para cortar.
+    `registro_uso`, si se pasa, se rellena al terminar el stream. Es un dict de
+    salida y no un valor de retorno porque un generador ya usa el `return`.
     """
-    cliente = obtener_cliente()
-    with cliente.messages.stream(
-        model=modelo_configurado(),
-        max_tokens=max_tokens,
-        system=system,
-        messages=messages,
-    ) as stream:
-        for texto in stream.text_stream:
-            yield texto
-
-        if registro_uso is not None:
-            try:
-                final = stream.get_final_message()
-                registro_uso.update(leer_uso(getattr(final, "usage", None)))
-            except Exception:  # noqa: BLE001 - el uso es informativo, no critico
-                pass
+    p = _proveedor_o_error()
+    yield from p.stream(modelo_configurado(), system, mensajes, max_tokens,
+                        registro_uso)
 
 
-def completar(system: list[dict] | str, messages: list[dict],
-              tools: list[dict] | None = None, max_tokens: int = MAX_TOKENS):
-    """Una llamada sin streaming. Devuelve el Message crudo de la SDK.
+def correr_agente(system, mensajes: list[dict], tools: list[dict],
+                  ejecutar, on_tool, max_tokens: int = MAX_TOKENS):
+    """El loop de herramientas. Devuelve (texto_final, uso_acumulado).
 
-    Es la que usa el agente: con tools el streaming complica el loop y no
-    aporta, porque las respuestas entre herramientas son cortas.
+    `ejecutar(nombre, argumentos) -> str` corre la herramienta.
+    `on_tool(nombre, argumentos, salida)` es para mostrarla en la UI.
+
+    El loop en sí vive en el adaptador: el formato de la conversación con
+    herramientas es lo más distinto entre las dos APIs (bloques `tool_use` vs
+    `function_call` en `parts`), y escribirlo dos veces en la UI sería
+    garantizar que uno de los dos se desactualice.
     """
-    cliente = obtener_cliente()
-    kwargs = dict(
-        model=modelo_configurado(),
-        max_tokens=max_tokens,
-        system=system,
-        messages=messages,
-    )
-    if tools:
-        kwargs["tools"] = tools
-    return cliente.messages.create(**kwargs)
+    p = _proveedor_o_error()
+    return p.agente(modelo_configurado(), system, mensajes, tools,
+                    ejecutar, on_tool, max_tokens)

@@ -48,8 +48,9 @@ from ia.explicador import explicar, PREGUNTAS
 # `anthropic`, el asistente tiene que seguir funcionando completo sin ella.
 try:
     from ia.cliente import (
-        stream_texto, completar, hay_credencial, modelo_configurado, SinAPIKey,
-        leer_uso, resumen_uso,
+        stream_texto, correr_agente, hay_credencial, modelo_configurado,
+        SinAPIKey, resumen_uso, etiqueta_proveedor, aviso_datos,
+        bot_habilitado, motivo_bot_apagado, explicar_error,
     )
     from ia.contexto import cargar_docs, resumen_resultados, bloques_system
     IA_IMPORTABLE = True
@@ -67,7 +68,6 @@ CLAVES_HISTORIA = {
 }
 
 MAX_TURNOS_API = 12
-MAX_ITERACIONES_AGENTE = 12
 
 _NIVELES = {
     "problema": ("🔴", st.error),
@@ -77,9 +77,17 @@ _NIVELES = {
 }
 
 
-def ia_disponible() -> bool:
-    """Hay SDK Y credencial: recién ahí se ofrece el chat."""
-    return IA_IMPORTABLE and hay_credencial()
+def ia_disponible(bot: str | None = None) -> bool:
+    """Hay módulo, credencial y —si se pide un bot— ese bot habilitado.
+
+    El `bot` importa porque no todos mandan lo mismo: `docs` envía la
+    documentación, `resultados` y `agente` envían además los números de la
+    corrida. Con una key de tier gratuito eso no da igual. Ver el encabezado de
+    `ia/cliente.py`.
+    """
+    if not (IA_IMPORTABLE and hay_credencial()):
+        return False
+    return bot_habilitado(bot) if bot else True
 
 
 # `cache_resource` y no `cache_data`: la diferencia es que `cache_data` COPIA
@@ -106,11 +114,20 @@ def _obsoletos_cacheado(carpeta: str = "docs") -> list[str]:
 
 
 def contexto_ia(resultados, serie, factor_mm) -> tuple[str, str]:
-    """(docs, resumen) para los chats del tab. Vacíos si no hay IA."""
+    """(docs, resumen) para los chats del tab. Vacíos si no hacen falta.
+
+    El resumen de la corrida es la parte cara de armar, así que NO se arma si
+    los dos bots que lo usan están apagados.
+    """
     if not ia_disponible():
         return "", ""
-    return (_docs_crudos(),
-            resumen_resultados(resultados, factor_mm=factor_mm, serie=serie))
+    docs = _docs_crudos() if any(
+        ia_disponible(b) for b in ("docs", "resultados", "agente")) else ""
+    resumen = ""
+    if ia_disponible("resultados") or ia_disponible("agente"):
+        resumen = resumen_resultados(resultados, factor_mm=factor_mm,
+                                     serie=serie)
+    return docs, resumen
 
 
 # ===========================================================================
@@ -257,20 +274,33 @@ def _bloque_ia(etiqueta: str, clave: str, sufijo: str, cuerpo):
     es el segundo intento, cuando el buscador no alcanzó.
     """
     st.divider()
-    if not ia_disponible():
+
+    if not IA_IMPORTABLE:
         with st.expander("🤖 Chat con IA (desactivado)"):
-            if not IA_IMPORTABLE:
-                st.caption(f"Falta el paquete `anthropic` ({ERROR_IA}).")
-            else:
-                st.caption("Cargá `ANTHROPIC_API_KEY` en "
-                           "`.streamlit/secrets.toml` para sumar un chat que "
-                           "responde preguntas abiertas. Todo lo de arriba "
-                           "funciona igual sin eso.")
+            st.caption(f"Falta la SDK del proveedor ({ERROR_IA}). Agregá "
+                       "`anthropic` o `google-genai` a requirements.txt.")
+        return
+
+    if not hay_credencial():
+        with st.expander("🤖 Chat con IA (desactivado)"):
+            st.caption("Cargá `ANTHROPIC_API_KEY` o `GEMINI_API_KEY` en "
+                       "`.streamlit/secrets.toml` para sumar un chat que "
+                       "responde preguntas abiertas. Todo lo de arriba "
+                       "funciona igual sin eso.")
+        return
+
+    if not ia_disponible(clave):
+        with st.expander("🤖 Chat con IA (apagado para este bot)"):
+            st.warning(motivo_bot_apagado(clave))
         return
 
     with st.expander(f"🤖 {etiqueta}"):
-        st.caption(f"Modelo `{modelo_configurado()}`. **Lo que preguntes y el "
-                   "contexto viajan a la API de Anthropic.**")
+        st.caption(f"{etiqueta_proveedor()} · modelo `{modelo_configurado()}`")
+        aviso = aviso_datos()
+        if aviso.startswith("⚠️"):
+            st.warning(aviso)
+        elif aviso:
+            st.caption(aviso)
         if st.button("🗑️ Limpiar", key=f"btn_limpiar_{clave}_{sufijo}"):
             st.session_state.pop(CLAVES_HISTORIA[clave], None)
             st.rerun()
@@ -321,7 +351,7 @@ def _chat(clave: str, system, sufijo: str, ejemplo: str):
             return
         except Exception as e:  # noqa: BLE001 - un fallo de API no tumba nada
             historia.pop()
-            st.error(f"La llamada a la API falló: {type(e).__name__}: {e}")
+            st.error(explicar_error(e))
             return
 
         # El consumo va como caption bajo la respuesta: es la única forma de
@@ -333,54 +363,8 @@ def _chat(clave: str, system, sufijo: str, ejemplo: str):
     historia.append({"role": "assistant", "content": str(respuesta)})
 
 
-def _extraer_texto(respuesta) -> str:
-    return "\n".join(b.text for b in respuesta.content
-                     if getattr(b, "type", "") == "text").strip()
-
-
-def _correr_agente(system, mensajes, ejecutor, log, uso_total: dict) -> str:
-    """messages -> (tool_use -> ejecutar -> tool_result)* -> texto final.
-
-    `uso_total` acumula TODAS las iteraciones: un pedido del agente son varias
-    llamadas, y mostrar sólo la última subestimaría el costo del turno.
-    """
-    from ia.herramientas import ESQUEMAS
-
-    for _ in range(MAX_ITERACIONES_AGENTE):
-        respuesta = completar(system, mensajes, tools=ESQUEMAS)
-
-        for clave, valor in leer_uso(getattr(respuesta, "usage", None)).items():
-            uso_total[clave] = uso_total.get(clave, 0) + valor
-
-        if respuesta.stop_reason != "tool_use":
-            return _extraer_texto(respuesta) or "(el modelo no devolvió texto)"
-
-        mensajes.append({"role": "assistant", "content": respuesta.content})
-
-        resultados_tools = []
-        for bloque in respuesta.content:
-            if getattr(bloque, "type", "") != "tool_use":
-                continue
-            with log:
-                with st.status(f"🔧 {bloque.name}") as estado:
-                    st.code(str(bloque.input), language="json")
-                    salida = ejecutor.ejecutar(bloque.name, bloque.input)
-                    st.text(salida[:2000])
-                    estado.update(state="complete")
-            resultados_tools.append({
-                "type": "tool_result",
-                "tool_use_id": bloque.id,
-                "content": salida,
-            })
-
-        mensajes.append({"role": "user", "content": resultados_tools})
-
-    return (f"Corté a las {MAX_ITERACIONES_AGENTE} iteraciones para no entrar "
-            "en un ciclo. Lo hecho quedó en el sandbox; pedime que siga.")
-
-
 def _chat_agente(resultados, docs, resumen, factor_mm, sufijo):
-    from ia.herramientas import Ejecutor
+    from ia.herramientas import Ejecutor, ESQUEMAS
 
     comunes = resultados.get("comunes")
     if not comunes:
@@ -422,14 +406,24 @@ def _chat_agente(resultados, docs, resumen, factor_mm, sufijo):
 
     with st.chat_message("assistant"):
         log = st.container()
-        uso_total: dict = {}
+
+        def _mostrar(nombre, argumentos, salida):
+            """Cada herramienta, según corre. La UI no sabe de qué API viene."""
+            with log:
+                with st.status(f"🔧 {nombre}") as estado:
+                    st.code(str(argumentos), language="json")
+                    st.text(salida[:2000])
+                    estado.update(state="complete")
+
         try:
             with st.spinner("Trabajando en el sandbox…"):
-                final = _correr_agente(system, _mensajes_para_api(historia),
-                                       ejecutor, log, uso_total)
+                final, uso_total = correr_agente(
+                    system, _mensajes_para_api(historia), ESQUEMAS,
+                    ejecutor.ejecutar, _mostrar)
         except Exception as e:  # noqa: BLE001
-            historia.pop()
-            st.error(f"El agente falló: {type(e).__name__}: {e}")
+            # El pedido NO se saca de la historia: con un rate limit conviene
+            # que quede a la vista para reintentarlo tal cual en un minuto.
+            st.error(explicar_error(e))
             return
         st.markdown(final)
         if uso_total:

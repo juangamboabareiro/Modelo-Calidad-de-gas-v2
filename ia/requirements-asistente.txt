@@ -1,0 +1,16 @@
+# SDK del proveedor de IA del asistente (OPCIONAL).
+#
+# Sin ninguna de las dos, el asistente funciona igual en modo local: buscador
+# de documentacion, glosario y explicador de la corrida. La SDK solo hace falta
+# para el chat.
+#
+# Agregar a requirements.txt SOLO la del proveedor que se vaya a usar: en el
+# 1 GB de Streamlit Community Cloud cada dependencia cuenta.
+
+# Google Gemini (tier gratuito disponible)
+google-genai
+# OJO: NO es `google-generativeai`, que esta archivada y no soporta los
+# modelos nuevos.
+
+# Anthropic
+# anthropic

@@ -1204,6 +1204,9 @@ def ejecutar_pipeline(path, params, guardar_csvs, silencioso=False) -> dict:
     ]
 
     if _tramos:
+        # El renombre a origen/destino/valor es el CONTRATO de esta tabla con
+        # `ui/mapa.py` y con `construir_vista_9300` (ver `_COLS_RED_VISTA`).
+        # Tocarlo acá sin tocar allá ya dejo un bloque muerto una vez.
         red_gasoductos = pd.concat(_tramos, ignore_index=True).rename(
             columns={"Area": "origen", "Gasoducto": "destino",
                      "Volumen_inyectado": "valor"})
@@ -1700,6 +1703,11 @@ elif run_serie:
 # ===========================================================================
 
 _REF_9300 = 9_300.0
+
+# Las columnas con las que `ejecutar_pipeline` deja `red_gasoductos` y con las
+# que `ui/mapa.py` la lee. Estan acá y no inline porque el bug que este bloque
+# arregla fue exactamente eso: dos lugares nombrando la misma tabla distinto.
+_COLS_RED_VISTA = {"origen", "destino", "valor"}
 UNIDAD_9300 = "MMm³/d de 9.300 kcal"
 UNIDAD_STD = "MMm³/d STD"
 
@@ -1826,19 +1834,48 @@ def construir_vista_9300(resultados: dict):
                       for k in ("vol_mega", "vol_tty", "vol_directo_a_gasoducto")}}
 
     # --- mapa de la red: PCS por (Area, Gasoducto) desde las tablas -------
+    #
+    # OJO CON LOS NOMBRES DE COLUMNA. `ejecutar_pipeline` guarda esta tabla ya
+    # RENOMBRADA a origen/destino/valor, que es lo que espera `ui/mapa.py`; el
+    # lookup de PCS, en cambio, sale de las tablas totales y viene con
+    # Area/Gasoducto. Hay que traducir uno de los dos lados.
+    #
+    # Este bloque estuvo muerto: el guard preguntaba por `Volumen_inyectado`,
+    # nombre que la red dejo de tener al renombrarse, asi que nunca entraba y
+    # el mapa quedaba en STD con el selector en 9.300 — sin error ni aviso. Y
+    # era un bug tapando a otro: el merge de abajo tambien usaba los nombres
+    # viejos, asi que arreglar solo el guard levantaba un KeyError. Este bloque
+    # NO corre dentro de `_render_seguro` (es nivel de script), asi que eso no
+    # habria roto un tab: habria tumbado la app.
     red = resultados.get("red_gasoductos")
-    if red is not None and len(red) and "Volumen_inyectado" in red.columns:
+    if red is not None and len(red) and _COLS_RED_VISTA <= set(red.columns):
         pares = []
         for t in (resultados.get("tablas") or {}).values():
             if t is not None and len(t) and "PCS" in getattr(t, "columns", ()):
                 pares.append(t[["Area", "Gasoducto", "PCS"]])
         if pares:
             lookup = (pd.concat(pares).dropna(subset=["PCS"])
-                      .drop_duplicates(["Area", "Gasoducto"]))
-            red2 = red.merge(lookup, on=["Area", "Gasoducto"], how="left")
-            factor = (red2["PCS"] / _REF_9300).fillna(1.0)
-            red2["Volumen_inyectado"] = red2["Volumen_inyectado"] * factor
+                      .drop_duplicates(["Area", "Gasoducto"])
+                      .rename(columns={"Area": "origen",
+                                       "Gasoducto": "destino"}))
+            red2 = red.merge(lookup, on=["origen", "destino"], how="left")
+
+            # Los tramos sin PCS quedan SIN convertir, mezclados con los
+            # convertidos en la misma tabla. Es a proposito: para el mapa, una
+            # arista en la unidad equivocada es menos malo que una arista que
+            # desaparece. Pero se cuentan y se avisan, que si son muchos el
+            # mapa deja de ser comparable con las tablas.
+            sin_pcs = int(red2["PCS"].isna().sum())
+            if sin_pcs:
+                avisos.append(
+                    f"Mapa de la red: {sin_pcs} de {len(red2)} tramos sin PCS "
+                    "cargado, quedan en STD dentro de la vista 9.300.")
+
+            red2["valor"] = red2["valor"] * (red2["PCS"] / _REF_9300).fillna(1.0)
             vista["red_gasoductos"] = red2.drop(columns=["PCS"])
+        else:
+            avisos.append("Mapa de la red: las tablas no traen PCS por "
+                          "(Area, Gasoducto); el mapa queda en STD.")
 
     return vista, avisos
 

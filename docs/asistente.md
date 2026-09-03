@@ -128,36 +128,112 @@ Sin nada más que eso, el tab ya funciona completo en modo sin IA.
 
 ## Encender la IA (opcional)
 
-1. `anthropic` en `requirements.txt`.
-2. `.streamlit/secrets.toml` (que va en `.gitignore`, no al repo):
+Soporta **dos proveedores**. El que se usa depende de qué key esté cargada; si
+están las dos y nadie eligió, gana Anthropic (es la que no entrena con lo que
+recibe, o sea el default más conservador).
 
-   ```toml
-   ANTHROPIC_API_KEY = "sk-ant-..."
-   ASISTENTE_MODELO = "claude-sonnet-5"   # opcional, es el default
-   ```
+```toml
+# .streamlit/secrets.toml  — va en .gitignore, nunca al repo
+ANTHROPIC_API_KEY = "sk-ant-..."     # si está, se usa Anthropic
+GEMINI_API_KEY    = "AIza..."        # si está, se usa Gemini
 
-3. Verificalo sin levantar la app:
+ASISTENTE_PROVEEDOR = "gemini"       # opcional: forzar uno
+ASISTENTE_MODELO    = "..."          # opcional: pisar el modelo
+ASISTENTE_BOTS      = "docs"         # opcional: qué bots tienen IA
+GEMINI_TIER_PAGO    = true           # declarar que la key no es gratuita
+```
 
-   ```bash
-   export ANTHROPIC_API_KEY=sk-ant-...
-   python tools/probar_asistente.py
-   ```
+En **Streamlit Community Cloud** no se pueden setear variables de entorno: todo
+esto va en Manage app → Settings → Secrets.
 
-   Hace dos preguntas iguales y confirma que la segunda lee del caché. Sirve
-   para separar "la credencial está mal" de "el tab tiene un bug".
+Y agregá al `requirements.txt` **sólo la SDK que vas a usar** — en 1 GB de RAM
+cada dependencia cuenta:
 
-### El modelo: Sonnet 5
+| Proveedor | Paquete |
+|---|---|
+| Anthropic | `anthropic` |
+| Gemini | `google-genai` ⚠️ **no** `google-generativeai`, que está archivada |
 
-`claude-sonnet-5` es el default. Tres cosas de este modelo que el código ya
-respeta y conviene no romper:
+Verificalo sin levantar la app:
 
-- **No setear `temperature`, `top_p` ni `top_k`** a valores no-default: devuelve
-  400. El cliente no los toca.
-- **No usar extended thinking manual**: también devuelve 400. El thinking
-  adaptativo viene activado solo.
-- Contexto de 1M tokens, así que la documentación entra holgada aunque crezca.
+```bash
+python tools/probar_asistente.py            # SDK, credencial, caché, costo
+python tools/probar_asistente.py --modelos  # qué modelos tiene TU key
+```
 
-### Prompt caching
+### El interruptor por bot (`ASISTENTE_BOTS`)
+
+Los tres bots no mandan lo mismo:
+
+| Bot | Qué envía |
+|---|---|
+| `docs` | la documentación del proyecto |
+| `resultados` | la documentación **más los números de la corrida** |
+| `agente` | lo mismo, y además opera el sandbox |
+
+Esa diferencia importa según el proveedor, así que el **default cambia**:
+
+- **Anthropic**, o **Gemini con `GEMINI_TIER_PAGO = true`** → los tres.
+- **Gemini en tier gratuito** → sólo `docs`.
+
+El motivo es de política de datos, no técnico: en el tier gratuito de Gemini
+**lo que enviás puede usarse para entrenar sus modelos y ser revisado por
+personas**, y Google pide explícitamente no mandar información confidencial a
+los servicios no pagos. Capacidades y volúmenes de plantas entran en esa
+categoría. La UI lo dice en pantalla cuando un bot está apagado por este
+motivo, con la línea exacta para habilitarlo si se decide que está bien.
+
+Ojo con el nombre: lo que apaga `ASISTENTE_BOTS` es **el chat de IA** de ese
+bot, no sus funciones. Con `resultados` apagado el explicador sigue leyendo la
+corrida y marcando plantas saturadas; con `agente` apagado el sandbox se opera
+igual desde su tab. Lo único que falta es poder pedírselo escribiendo.
+
+Ejemplos de configuración:
+
+```toml
+ASISTENTE_BOTS = "agente"                      # sólo el operador del sandbox
+ASISTENTE_BOTS = "docs,resultados"             # sin agente
+ASISTENTE_BOTS = "docs,resultados,agente"      # los tres (o "todos")
+```
+
+Nada de esto reemplaza la validación con seguridad de la información: **la
+política de la empresa manda sobre este documento.**
+
+### Gemini: lo que hay que saber
+
+- **Tier gratuito: sólo Flash y Flash-Lite** desde el 1/4/2026. Un modelo Pro
+  por default daría 404 o 429 con una key gratuita.
+- **Límites de ~10 requests por minuto.** Un turno del agente son varias
+  llamadas seguidas, así que su tope de iteraciones es **6** contra las 12 de
+  Anthropic: con 12 se choca el rate limit a mitad de camino y el usuario ve un
+  error en vez de una respuesta.
+
+  Esto hace que **el agente sea el peor caso para el tier gratuito**: es el bot
+  que más llamadas hace por turno. Si es el que más te importa, o le pedís de a
+  un cambio por vez, o conviene habilitar billing. Los errores de rate limit se
+  traducen a un mensaje que lo explica (`explicar_error` en `ia/cliente.py`), y
+  el pedido queda en la conversación para reintentarlo tal cual en un minuto.
+- **Los nombres de modelo rotan rápido.** El default (`gemini-2.5-flash`)
+  envejece; `--modelos` lista los que tu key tiene habilitados, que es más
+  confiable que cualquier valor escrito en el código.
+- **Caching implícito** en los modelos Flash, sin nada que declarar. El
+  contador de caché puede quedar en cero y no es un error.
+- **Sin precios cargados**: en el tier gratuito no hay costo y para el pago los
+  valores cambian seguido, así que la UI muestra tokens y no inventa un número
+  en dólares.
+
+### El modelo de Anthropic: Sonnet 5
+
+`claude-sonnet-5` es el default. Tres cosas que el código ya respeta y conviene
+no romper:
+
+- **No setear `temperature`, `top_p` ni `top_k`** a valores no-default:
+  devuelve 400.
+- **No usar extended thinking manual**: también devuelve 400. El adaptativo
+  viene activado solo.
+- Contexto de 1M tokens: la documentación entra holgada aunque crezca.
+
+### Prompt caching (sólo Anthropic)
 
 El asistente manda los docs enteros en cada pregunta. Para que eso no se pague
 completo todas las veces, el `system` va en **bloques** ordenados de estable a
@@ -173,32 +249,50 @@ El corte va ahí y no más adelante a propósito: el caché sólo pega si el pre
 hasta el corte es idéntico entre llamadas. Si estuviera después de los
 resultados, cada corrida escribiría una entrada nueva y no leería ninguna.
 
-Con Sonnet 5: mínimo cacheable 1.024 tokens (los docs lo superan de sobra),
-escritura 1,25× y **lectura 0,1×** del input base. En la práctica, la primera
-pregunta paga los docs completos y las siguientes pagan una décima parte,
-mientras se pregunte con menos de 5 minutos de diferencia (esa es la vida del
-caché, y cada uso la renueva).
+Con Sonnet 5: mínimo cacheable 1.024 tokens, escritura 1,25× y **lectura 0,1×**
+del input base, con 5 minutos de vida que cada uso renueva.
 
-Bajo cada respuesta la UI muestra los tokens y el costo estimado. **Es la forma
-de verificar que el caching anda**: la segunda pregunta seguida tiene que decir
-"desde caché". Los precios están en `PRECIOS` (`ia/cliente.py`) y son sólo para
-ese cartelito — la fuente de verdad es la consola de Anthropic. Si cambiás de
-modelo, actualizalos o el número miente.
+Gemini no tiene bloques de sistema, así que su adaptador **aplana los bloques**
+en `system_instruction` y el punto de corte se descarta: era información que
+sólo la API de Anthropic usaba.
 
-Antes de hacerlo con datos reales: **los bots 2 y 3 envían números de la corrida
-a un tercero.** Validarlo con seguridad de la información; la política de la
-empresa manda sobre este documento. Si no se aprueba, la capa sin IA queda como
-está y no se pierde nada.
+Bajo cada respuesta la UI muestra los tokens y, cuando se conoce, el costo. Con
+Anthropic **es la forma de verificar que el caching anda**: la segunda pregunta
+seguida tiene que decir "desde caché".
 
-Costo aproximado con Sonnet 5 ($2/MTok de entrada, $10/MTok de salida): del
-orden de centavos por pregunta, y bastante menos con el caché caliente. Un turno
-del agente son varias llamadas, no una, así que cuesta más que una pregunta
-suelta; el cartelito bajo su respuesta suma todas.
+### Arquitectura de la capa de IA
 
-### Cambiar de proveedor
+```
+ia/proveedores.py   los dos adaptadores (Anthropic, Gemini)
+ia/cliente.py       elige proveedor, normaliza uso, resuelve ASISTENTE_BOTS
+```
 
-`ia/cliente.py` es la única puerta de salida: para apuntar a un endpoint
-corporativo o a un modelo local (Ollama), se toca ese archivo y nada más.
+Nadie fuera de `ia/` sabe con qué proveedor está hablando.
+
+**El loop del agente vive en el adaptador, no en la UI.** Es lo más distinto
+entre las dos APIs: Anthropic usa bloques `tool_use` / `tool_result` en el
+historial, Gemini usa `function_call` / `function_response` dentro de `parts`.
+La UI pasa dos callbacks —cómo ejecutar una herramienta y cómo mostrarla— y no
+se entera del resto.
+
+Los esquemas de herramienta se traducen solos (`input_schema` → `parameters`),
+con una excepción que costó encontrar: **una herramienta sin parámetros tiene
+que ir sin `parameters`**, porque un objeto con `properties` vacío hace que
+Gemini rechace la declaración. Son `ver_registro`, `resolver_cascada` y
+`comparar_con_oficial`.
+
+### Errores de la API
+
+`explicar_error` traduce lo que devuelve la SDK a algo accionable: rate limit,
+modelo inexistente, credencial rechazada, respuesta bloqueada por filtros. Sin
+eso la UI mostraba el `repr` de una excepción de la SDK, que no le dice nada a
+nadie. Si aparece un error nuevo y frecuente, sumarle un caso ahí es una línea.
+
+### Cambiar de proveedor otra vez
+
+Agregar un tercero (un endpoint corporativo, Ollama) es una clase más en
+`ia/proveedores.py` con esos cuatro métodos, y su nombre en `PROVEEDORES`.
+Ningún otro archivo se toca.
 
 ## Mantenimiento
 
@@ -206,9 +300,5 @@ corporativo o a un modelo local (Ollama), se toca ese archivo y nada más.
   estás editando en caliente).
 - Término que confunde a los nuevos → sumalo al `GLOSARIO`.
 - Situación que se repite en las corridas → hacela una regla del explicador.
-- **Tab que se saca o se renombra → grepear `explicador.py`.** El campo `donde`
-  de cada `Hallazgo` se imprime tal cual ("Dónde mirarlo: tab X") y no lo valida
-  nada: al eliminar el tab *Cascada*, dos reglas quedaron mandando a un tab que
-  ya no existía.
 - Herramienta nueva para el agente → esquema en `ESQUEMAS` + método homónimo en
   `Ejecutor`.
