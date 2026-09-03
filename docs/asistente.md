@@ -239,9 +239,25 @@ política de la empresa manda sobre este documento.**
   un cambio por vez, o conviene habilitar billing. Los errores de rate limit se
   traducen a un mensaje que lo explica (`explicar_error` en `ia/cliente.py`), y
   el pedido queda en la conversación para reintentarlo tal cual en un minuto.
-- **Los nombres de modelo rotan rápido.** El default (`gemini-2.5-flash`)
-  envejece; `--modelos` lista los que tu key tiene habilitados, que es más
-  confiable que cualquier valor escrito en el código.
+- **Los nombres de modelo rotan rapidísimo, así que el default es un ALIAS.**
+  `gemini-flash-latest` apunta siempre al Flash estable del momento. Poner una
+  versión concreta no aguanta: 3.8 Flash salió tres semanas después de 3.7, y
+  las 2.x se van apagando con fecha (2.0 en junio de 2026, 2.5 en octubre). El
+  default anterior era `gemini-2.5-flash` y empezó a dar 404.
+
+  La contra del alias es que el modelo cambia abajo sin avisar, así que una
+  respuesta puede mejorar o empeorar de un día para el otro. Para este uso es
+  un precio razonable a cambio de no romperse cada mes; si alguna vez hace
+  falta reproducibilidad, se fija una versión con `ASISTENTE_MODELO`.
+
+  `--modelos` lista lo que tu key tiene habilitado, que es la respuesta
+  autoritativa cuando algo no anda.
+
+- **`gemini-flash-lite-latest` puede convenir para el agente.** Es más barato
+  y, lo que importa más en el tier gratuito, tiene **más requests por minuto**,
+  así que aguanta mejor los varios turnos que hace el agente del sandbox. A
+  cambio de menos capacidad de razonamiento — si empieza a inventar nombres de
+  planta en vez de mirar `ver_registro`, volvé a Flash.
 - **Caching implícito** en los modelos Flash, sin nada que declarar. El
   contador de caché puede quedar en cero y no es un error.
 - **Sin precios cargados**: en el tier gratuito no hay costo y para el pago los
@@ -309,10 +325,43 @@ Gemini rechace la declaración. Son `ver_registro`, `resolver_cascada` y
 
 ### Errores de la API
 
-`explicar_error` traduce lo que devuelve la SDK a algo accionable: rate limit,
-modelo inexistente, credencial rechazada, respuesta bloqueada por filtros. Sin
-eso la UI mostraba el `repr` de una excepción de la SDK, que no le dice nada a
-nadie. Si aparece un error nuevo y frecuente, sumarle un caso ahí es una línea.
+Dos piezas, y la distinción entre ellas es lo importante:
+
+**`con_reintentos` (`ia/proveedores.py`)** reintenta lo que es **transitorio**,
+con backoff de 2, 4 y 8 segundos. Los dos casos reales con el tier gratuito de
+Gemini:
+
+- **503 / "overloaded" / "high demand"** — el modelo está saturado del lado de
+  Google. Al tier gratuito le cortan capacidad primero cuando hay picos, así
+  que aparece seguido y **no es un problema de configuración**.
+- **429** — rate limit propio.
+
+Los dos se arreglan esperando, así que reintentar es la respuesta correcta:
+mostrarle el error al usuario para que apriete de nuevo es hacerle hacer a mano
+lo que el código puede hacer solo.
+
+Lo que **no** se reintenta: 401/403 (credencial), 404 (modelo inexistente), 400
+(pedido mal armado). No mejoran esperando, y reintentarlos sólo demora el
+mensaje útil.
+
+Dos detalles del alcance:
+
+- En el **stream**, el reintento envuelve la *apertura*, no el consumo: si el
+  modelo ya empezó a escribir y se corta, reintentar duplicaría el texto que el
+  usuario vio. Un 503 aparece casi siempre al abrir.
+- En el **agente**, cada iteración reintenta por su cuenta: un 503 en el paso 4
+  no tiene por qué tirar abajo los tres anteriores, que ya modificaron el
+  sandbox.
+
+**`explicar_error` (`ia/cliente.py`)** traduce lo que sí llega al usuario:
+saturación, rate limit, modelo inexistente, credencial rechazada, respuesta
+bloqueada por filtros. Sin eso la UI mostraba el `repr` de una excepción de la
+SDK, que no le dice nada a nadie.
+
+Un orden que importa ahí: **el 503 se chequea antes que el 429**, porque cuando
+el modelo está saturado Google a veces devuelve los dos códigos en el mismo
+mensaje y la causa real es la sobrecarga. Decirle "llegaste a tu límite" a
+alguien que no llegó lo manda a buscar el problema donde no está.
 
 ### Cambiar de proveedor otra vez
 

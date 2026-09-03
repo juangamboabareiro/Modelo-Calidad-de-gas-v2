@@ -41,6 +41,59 @@ class SinAPIKey(RuntimeError):
     """No hay credencial configurada. La UI la atrapa y muestra el como."""
 
 
+# Reintentos ante errores TRANSITORIOS del proveedor.
+#
+# Los dos que aparecen de verdad con el tier gratuito de Gemini:
+#   503 UNAVAILABLE / "model is overloaded" -> el modelo esta saturado. Al tier
+#       gratuito le cortan capacidad primero cuando hay picos de demanda, asi
+#       que es frecuente y NO es un problema de configuracion.
+#   429 RESOURCE_EXHAUSTED                  -> rate limit propio.
+#
+# Los dos se arreglan esperando, asi que reintentar es la respuesta correcta;
+# mostrarle el error al usuario para que apriete de nuevo es hacerle hacer a
+# mano lo que el codigo puede hacer solo.
+#
+# Lo que NO se reintenta: 401/403 (credencial), 404 (modelo inexistente),
+# 400 (pedido mal armado). Esos no mejoran esperando y reintentarlos solo
+# demora el mensaje util.
+REINTENTOS = 3
+ESPERA_BASE = 2.0     # segundos; se duplica en cada intento (2, 4, 8)
+
+
+def es_transitorio(e: Exception) -> bool:
+    t = str(e).lower()
+    return any(m in t for m in (
+        "503", "unavailable", "overloaded", "high demand", "try again",
+        "429", "resource_exhausted", "rate limit", "quota exceeded",
+        "500", "internal error", "deadline", "timeout",
+    ))
+
+
+def con_reintentos(fn, descripcion: str = "la llamada"):
+    """Corre `fn()` reintentando los errores transitorios, con backoff.
+
+    Devuelve lo que devuelva `fn`. Si se agotan los intentos, levanta el
+    ultimo error con el contexto agregado, para que el mensaje de la UI diga
+    que ya se reintento y no parezca que fallo al primer golpe.
+    """
+    import time
+
+    ultimo = None
+    for intento in range(REINTENTOS):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001
+            if not es_transitorio(e):
+                raise
+            ultimo = e
+            if intento < REINTENTOS - 1:
+                time.sleep(ESPERA_BASE * (2 ** intento))
+
+    raise RuntimeError(
+        f"El proveedor sigue sin responder despues de {REINTENTOS} intentos "
+        f"({descripcion}). Ultimo error: {ultimo}") from ultimo
+
+
 def leer_secreto(nombre: str) -> str | None:
     """Busca en st.secrets primero, en el entorno despues.
 
@@ -146,9 +199,11 @@ class Anthropic:
         uso_total: dict = {}
 
         for _ in range(max_iter):
-            r = cliente.messages.create(
-                model=modelo, max_tokens=max_tokens, system=system,
-                messages=hist, tools=tools)
+            r = con_reintentos(
+                lambda: cliente.messages.create(
+                    model=modelo, max_tokens=max_tokens, system=system,
+                    messages=hist, tools=tools),
+                "un paso del agente")
 
             for k, v in cls._uso(getattr(r, "usage", None)).items():
                 uso_total[k] = uso_total.get(k, 0) + v
@@ -180,12 +235,29 @@ class Anthropic:
 class Gemini:
     nombre = "gemini"
     etiqueta = "Google Gemini"
-    # Desde el 1/4/2026 el tier gratuito solo tiene Flash y Flash-Lite: un
-    # modelo Pro por default daria 429 o 404 con una key gratuita. Los nombres
-    # de modelo de Gemini rotan rapido — `tools/probar_asistente.py --modelos`
-    # lista los que TU key tiene habilitados, que es mas confiable que
-    # cualquier default escrito acá.
-    modelo_default = "gemini-2.5-flash"
+    # UN ALIAS, NO UNA VERSION. Los nombres de modelo de Gemini rotan
+    # rapidisimo: 3.8 Flash salio tres semanas despues de 3.7, y las versiones
+    # 2.x se van apagando con fecha (2.0 en junio de 2026, 2.5 en octubre).
+    # Cualquier numero escrito aca queda viejo en semanas y devuelve 404 — ya
+    # paso con `gemini-2.5-flash`. `gemini-flash-latest` apunta siempre al
+    # Flash estable del momento.
+    #
+    # La contra del alias: el modelo cambia abajo sin avisar, asi que una
+    # respuesta puede mejorar o empeorar de un dia para el otro sin que nadie
+    # toque nada. Para este uso (explicar documentacion, operar el sandbox) es
+    # un precio razonable a cambio de no romperse cada mes; si alguna vez hace
+    # falta reproducibilidad, se fija una version con ASISTENTE_MODELO.
+    #
+    # Alternativa: `gemini-flash-lite-latest` es mas barato y —lo que importa
+    # mas en el tier gratuito— tiene mas requests por minuto, asi que aguanta
+    # mejor al agente del sandbox. A cambio de menos capacidad de razonamiento.
+    #
+    # Y del lado del Pro: el tier gratuito NO lo incluye desde el 1/4/2026, asi
+    # que un modelo Pro por default daria 429 o 404 con una key gratuita.
+    #
+    # Para ver que tiene habilitado TU key:
+    #     python tools/probar_asistente.py --modelos
+    modelo_default = "gemini-flash-latest"
     clave_secreto = "GEMINI_API_KEY"
     paquete = "google-genai"
 
@@ -275,14 +347,23 @@ class Gemini:
     @classmethod
     def stream(cls, modelo, system, mensajes, max_tokens, registro_uso=None):
         cliente = cls.cliente()
+        contents = cls._a_contents(mensajes)
+        config = cls._config(system, max_tokens)
+
+        # El reintento envuelve la APERTURA del stream, no su consumo: si el
+        # modelo ya empezo a escribir y se corta, reintentar duplicaria el
+        # texto que el usuario vio. Un 503 aparece casi siempre al abrir.
+        iterador = con_reintentos(
+            lambda: cliente.models.generate_content_stream(
+                model=modelo, contents=contents, config=config),
+            "abrir el stream")
+
         ultimo = None
-        for trozo in cliente.models.generate_content_stream(
-            model=modelo, contents=cls._a_contents(mensajes),
-            config=cls._config(system, max_tokens),
-        ):
+        for trozo in iterador:
             ultimo = trozo
             if trozo.text:
                 yield trozo.text
+
         if registro_uso is not None and ultimo is not None:
             try:
                 registro_uso.update(
@@ -301,8 +382,13 @@ class Gemini:
         uso_total: dict = {}
 
         for _ in range(max_iter):
-            r = cliente.models.generate_content(
-                model=modelo, contents=contents, config=config)
+            # Cada paso del agente reintenta por su cuenta: un 503 en la
+            # iteracion 4 no tiene por que tirar abajo las tres anteriores,
+            # que ya modificaron el sandbox.
+            r = con_reintentos(
+                lambda: cliente.models.generate_content(
+                    model=modelo, contents=contents, config=config),
+                "un paso del agente")
 
             for k, v in cls._uso(getattr(r, "usage_metadata", None)).items():
                 uso_total[k] = uso_total.get(k, 0) + v

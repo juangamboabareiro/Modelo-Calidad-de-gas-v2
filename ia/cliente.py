@@ -218,6 +218,19 @@ def explicar_error(e: Exception) -> str:
     texto = str(e)
     bajo = texto.lower()
 
+    # El 503 va ANTES del 429: cuando el modelo esta saturado, Google a veces
+    # devuelve los dos codigos en el mismo mensaje, y la causa real es la
+    # sobrecarga, no la cuota del usuario. Decirle "llegaste a tu limite" a
+    # alguien que no llego lo manda a buscar el problema donde no esta.
+    if "503" in texto or "unavailable" in bajo or "overloaded" in bajo \
+            or "high demand" in bajo:
+        return ("El modelo está saturado del lado de Google (pico de demanda), "
+                "no es un problema de tu configuración ni de tu cuota. Ya "
+                "reintenté solo unas cuantas veces. Opciones: esperar unos "
+                "minutos, o probar `ASISTENTE_MODELO = \"gemini-flash-lite-latest\"` "
+                "en los secretos, que suele estar menos congestionado. Al tier "
+                "gratuito le cortan capacidad primero cuando hay picos.")
+
     if "429" in texto or "resource_exhausted" in bajo or "quota" in bajo \
             or "rate limit" in bajo:
         extra = ""
@@ -227,6 +240,11 @@ def explicar_error(e: Exception) -> str:
                      "chocarlo. Esperá un minuto y pedile UN cambio por vez, o "
                      "habilitá billing para subir el límite.")
         return f"Llegaste al límite de llamadas por minuto.{extra}"
+
+    if "sigue sin responder despues de" in texto:
+        # Viene de `con_reintentos`: ya se agotaron los intentos y el mensaje
+        # trae el ultimo error adentro. Se pasa tal cual, que ya es claro.
+        return texto
 
     if "404" in texto or "not found" in bajo:
         return (f"El modelo `{modelo_configurado()}` no existe o tu key no lo "
