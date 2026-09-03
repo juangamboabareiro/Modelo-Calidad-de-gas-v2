@@ -46,3 +46,35 @@ urllib3==2.7.0
 uvicorn==0.52.1
 watchdog==6.0.0
 websockets==16.1.1
+
+# ---------------------------------------------------------------------------
+# Capa de IA del asistente (opcional)
+# ---------------------------------------------------------------------------
+# Sin esto el asistente funciona igual en modo local: buscador de
+# documentacion, glosario y explicador de la corrida. Solo hace falta para el
+# chat y el agente del sandbox.
+#
+# OJO: es `google-genai`, NO `google-generativeai`. La segunda es la SDK vieja,
+# esta archivada y no soporta los modelos nuevos. Si alguna vez quedo instalada,
+# desinstalarla: las dos comparten el namespace `google` y conviven mal.
+#
+# Va sin pin porque no se cual es la ultima version estable al momento de
+# escribir esto. Cuando el deploy funcione, fijarla como el resto del archivo:
+#     pip freeze | Select-String google-genai      (PowerShell)
+#     pip freeze | grep google-genai               (bash)
+google-genai
+
+# Si en vez de Gemini se usa Anthropic, comentar la linea de arriba y
+# descomentar esta. No hace falta tener las dos: el asistente elige el
+# proveedor segun que key este cargada (ver docs/asistente.md).
+# anthropic
+
+# ---------------------------------------------------------------------------
+# Perfilador (opcional, chico)
+# ---------------------------------------------------------------------------
+# `ui/perfil.py` lo usa para mostrar la memoria del proceso. Sin psutil el
+# panel muestra los tiempos por tab pero no la memoria, que en Streamlit
+# Community Cloud —1 GB, y reinicia la app al pasarse— suele ser el dato que
+# explica los sintomas que los tiempos no explican.
+# Se enciende con el secreto `PERFIL = true`; apagado no cuesta nada.
+psutil
