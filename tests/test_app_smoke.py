@@ -172,7 +172,7 @@ def _resolver_sandbox(at):
 
 @pytest.mark.integracion
 def test_con_datos_estan_los_tabs_del_tablero(app):
-    """Los diez tabs del tablero, por nombre.
+    """Los nueve tabs del tablero, por nombre.
 
     Se verifica por ETIQUETA y no por cantidad: `at.tabs` devuelve todos los
     tabs de la página, incluidos los anidados (los tres del asistente, los
@@ -183,12 +183,19 @@ def test_con_datos_estan_los_tabs_del_tablero(app):
     assert not at.exception, [str(e) for e in at.exception]
 
     etiquetas = [t.label for t in at.tabs]
-    esperados = ["Resumen", "Graphs", "Cascada", "Tablas totales",
+    esperados = ["Resumen", "Graphs", "Tablas totales",
                  "Mapa de la red", "TTY - TBX", "TTY - Dew Point", "MEGA",
                  "Plantas (sandbox)", "Asistente"]
 
     faltan = [e for e in esperados if e not in etiquetas]
     assert not faltan, f"faltan tabs del tablero: {faltan}. Hay: {etiquetas}"
+
+    # "Cascada" se saco: su diagrama no agregaba nada sobre la tabla de reparto
+    # y el mapa de la red. Se afirma que NO esta, no solo que no se exige: sin
+    # esto, reintroducirlo no rompe ningun test y la decision se pierde.
+    assert "Cascada" not in etiquetas, (
+        "volvio el tab Cascada. Si es a proposito, sacá esta aserción y "
+        "actualizá `manual_usuario.md`.")
 
 
 @pytest.mark.integracion

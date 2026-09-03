@@ -341,45 +341,6 @@ def _armar_esquema(datos: dict) -> dict:
     }
 
 
-def _dot_cascada(plantas: dict, tbx_en_servicio: bool) -> str:
-    """Grafo de la cascada, con los volúmenes de cada tramo en MMm3/d."""
-    lineas = [
-        "digraph G {",
-        "  rankdir=LR;",
-        '  node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];',
-        '  edge [fontname="Arial", fontsize=9];',
-        '  pool [label="Pool TTY", fillcolor="#FDEBD0"];',
-        '  poolmega [label="Pool MEGA", fillcolor="#FDEBD0"];',
-        '  byp [label="ByPass", shape=ellipse, fillcolor="#FADBD8"];',
-    ]
-    for nombre, datos in plantas.items():
-        color = datos.get("color", "#EAF2F8")
-        estilo = "" if datos["flujos"].get("activa", True) else ", style=\"rounded,filled,dashed\""
-        lineas.append(f'  "{nombre}" [fillcolor="{color}"{estilo}];')
-
-    primero = "TTY - TBX" if tbx_en_servicio else "TTY - Dew Point"
-    lineas.append(f'  pool -> "{primero}" [label="{_fmt(_a_mm(plantas[primero]["flujos"]["vol_disponible"]), 2)}"];')
-
-    if tbx_en_servicio:
-        f = plantas["TTY - TBX"]["flujos"]
-        lineas.append(f'  "TTY - TBX" -> "TTY - Dew Point" [label="{_fmt(_a_mm(f["vol_derivado"]), 2)}"];')
-        if f["bypass"] > 0:
-            lineas.append(f'  "TTY - TBX" -> byp [label="{_fmt(_a_mm(f["bypass"]), 2)}", style=dashed];')
-
-    f_dp = plantas["TTY - Dew Point"]["flujos"]
-    lineas.append(f'  "TTY - Dew Point" -> "MEGA" [label="{_fmt(_a_mm(f_dp["vol_derivado"]), 2)}"];')
-    if f_dp["bypass"] > 0:
-        lineas.append(f'  "TTY - Dew Point" -> byp [label="{_fmt(_a_mm(f_dp["bypass"]), 2)}", style=dashed];')
-
-    lineas.append('  poolmega -> "MEGA";')
-    f_mega = plantas["MEGA"]["flujos"]
-    if f_mega["bypass"] > 0:
-        lineas.append(f'  "MEGA" -> byp [label="{_fmt(_a_mm(f_mega["bypass"]), 2)}", style=dashed];')
-
-    lineas.append("}")
-    return "\n".join(lineas)
-
-
 # ===========================================================================
 # Recarga en caliente de módulos sensibles a config.py
 # ===========================================================================
@@ -1920,11 +1881,10 @@ st.sidebar.caption(f"Mostrando volúmenes en **{unidad_volumen}**.")
 
 plantas = resultados["plantas"]
 flujos_plantas = resultados["flujos_plantas"]
-tbx_en_servicio_res = resultados["tbx_en_servicio"]
 
-(tab_resumen, tab_graphs, tab_cascada, tab_tablas, tab_red,
+(tab_resumen, tab_graphs, tab_tablas, tab_red,
  tab_tbx, tab_dp, tab_mega, tab_sandbox, tab_asistente) = st.tabs(
-    ["Resumen", "Graphs", "Cascada", "Tablas totales", "Mapa de la red",
+    ["Resumen", "Graphs", "Tablas totales", "Mapa de la red",
      "TTY - TBX", "TTY - Dew Point", "MEGA", "Plantas (sandbox)", "Asistente"]
 )
 
@@ -1977,14 +1937,6 @@ with tab_resumen:
     )
     _boton_descarga(flujos_plantas.reset_index(names="Planta"), "flujos_plantas", key="flujos")
 
-with tab_cascada:
-    st.subheader("Cascada del pool de gas")
-    if tbx_en_servicio_res:
-        st.caption("Post-PM: el pool TTY entra por TTY-TBX. Valores en MMm3/d.")
-    else:
-        st.caption("Pre-PM: TTY-TBX fuera de servicio, el pool TTY va directo a TTY-DP. "
-                   "Valores en MMm3/d.")
-    st.graphviz_chart(_dot_cascada(plantas, tbx_en_servicio_res), use_container_width=True)
 
 def _render_seguro(nombre_tab: str, fn, *args, **kwargs):
     """Ejecuta el contenido de un tab aislando sus errores.

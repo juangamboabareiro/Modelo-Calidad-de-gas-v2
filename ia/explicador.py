@@ -14,6 +14,12 @@ Cada regla devuelve un `Hallazgo`:
     detalle el porque, con los numeros a la vista
     donde   en que tab del tablero mirarlo
 
+OJO CON `donde`: se imprime tal cual ("Donde mirarlo: tab X") y NADIE lo
+valida contra los tabs que existen. Si se saca o se renombra un tab hay que
+grepear este archivo, o el explicador manda a la gente a un tab fantasma.
+Ya paso: las reglas de TBX y de derivaciones apuntaban al tab "Cascada"
+despues de que se eliminara.
+
 Agregar una regla nueva = una funcion que reciba el contexto y devuelva
 Hallazgos, sumada a `_REGLAS`. Nada mas.
 """
@@ -109,12 +115,12 @@ def _r_tbx(ctx: Contexto) -> list[Hallazgo]:
             "El pool de TTY entra primero por TTY-TBX y lo que sobra pasa a "
             "TTY-Dew Point. Es la configuracion posterior a la parada de "
             "mantenimiento.",
-            "Cascada")]
+            "Resumen")]
     return [Hallazgo(
         "info", "TTY-TBX fuera de servicio (pre-PM)",
         "Antes de la parada de mantenimiento, el pool de TTY va directo a "
         "TTY-Dew Point: TBX no trata nada en este periodo.",
-        "Cascada")]
+        "Resumen")]
 
 
 def _r_capacidad(ctx: Contexto) -> list[Hallazgo]:
@@ -131,7 +137,7 @@ def _r_capacidad(ctx: Contexto) -> list[Hallazgo]:
             hallazgos.append(Hallazgo(
                 "info", f"{planta}: fuera de servicio",
                 "No esta activa en esta corrida, asi que no trata gas.",
-                "Reparto del gas"))
+                "Resumen > Reparto del gas"))
             continue
 
         maximo = float(fila.get("vol_maximo") or 0)
@@ -146,13 +152,13 @@ def _r_capacidad(ctx: Contexto) -> list[Hallazgo]:
                 f"Trata {asignado:,.2f} de un maximo de {maximo:,.2f} MMm3/d "
                 f"({uso:.0%}). Todo el gas que le llegue de mas no lo puede "
                 "procesar: se deriva o pasa de largo.",
-                "Reparto del gas"))
+                "Resumen > Reparto del gas"))
         elif uso <= UMBRAL_OCIOSA:
             hallazgos.append(Hallazgo(
                 "info", f"{planta}: con capacidad de sobra",
                 f"Trata {asignado:,.2f} de {maximo:,.2f} MMm3/d ({uso:.0%}): "
                 "tiene margen para recibir mas gas.",
-                "Reparto del gas"))
+                "Resumen > Reparto del gas"))
 
         bypass = float(fila.get("bypass") or 0)
         if bypass > UMBRAL_BYPASS:
@@ -161,7 +167,7 @@ def _r_capacidad(ctx: Contexto) -> list[Hallazgo]:
                 "Ese gas llega a la planta pero pasa de largo sin tratarse "
                 "(limite de proceso o de evacuacion). No va a otra planta: "
                 "sigue de largo tal como esta.",
-                "Reparto del gas"))
+                "Resumen > Reparto del gas"))
 
         derivado = float(fila.get("vol_derivado") or 0)
         if derivado > 0:
@@ -170,7 +176,7 @@ def _r_capacidad(ctx: Contexto) -> list[Hallazgo]:
                 "Es el sobrante que le pasa a la planta siguiente de la "
                 "cascada. Ese volumen es el vol_disponible de la que sigue, "
                 "asi que no hay que sumar la columna entre plantas.",
-                "Cascada"))
+                "Resumen > Reparto del gas"))
 
     return hallazgos
 
