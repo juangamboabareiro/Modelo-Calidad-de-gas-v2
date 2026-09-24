@@ -37,9 +37,24 @@ destinos, y descartaba en silencio las áreas que inyectan directo a la planta.
 
 NOTA SOBRE PARAMETROS EN VIVO
 -----------------------------
-Varios módulos leen `config` a nivel de módulo, así que el valor queda congelado
-en el primer import. Mientras eso no se refactorice, se recargan en caliente
-(`importlib.reload`) en orden de dependencias en cada ejecución.
+Las capacidades y topes viajan en el dict `params` de la sidebar y se le pasan
+explícitamente a `modelar_TTY` / `modelar_MEGA`. Además se espejan en `config`
+con `setattr` (`_sincronizar_config`) porque el sandbox siembra su registro
+desde ahí. Ya NO se hace `importlib.reload` de ningún módulo: los módulos de
+plantas nunca leyeron `config.` en tiempo de ejecución (solo lo importaban), y
+las constantes físicas que `domain.ctes_gas` lee del Excel se cargan una vez
+por archivo con `_constantes` (cacheada) en vez de re-importar el módulo.
+
+RENDIMIENTO (serie temporal)
+----------------------------
+La serie corre `ejecutar_pipeline` una vez por mes. Todo lo que NO depende del
+mes está separado y cacheado por (path, mtime, size) del Excel:
+  - `_cargar_hojas`   : las diez lecturas del Excel.
+  - `_constantes`     : Constantes-GAS.
+  - `_etapa_comun`    : preprocesamiento, inyección std, reparto a destinos,
+                        premisas de cromatografía y sufijos.
+Por mes queda solo lo que sí cambia: el query del período en las tablas
+totales, el ruteo por hub y la cascada de plantas.
 
 UNIDADES
 --------
@@ -50,11 +65,11 @@ UNIDADES
 - retenidos_vol y CAPACIDAD_EVACUACION_*: tn/d.
 """
 
-import importlib
 import inspect
 import io
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import streamlit as st
@@ -71,7 +86,13 @@ from io_.loaders import (
     load_plantas_yacimientos,
     load_matriz_inyecciones,
     load_cromas_hubs,
+    load_constantes_gas,
 )
+import domain.ctes_gas as ctes_gas_modulo
+from pipeline.preprocesamiento import preprocesar_inputs
+from pipeline.plantas.TTY import modelar_TTY
+from pipeline.plantas.MEGA import modelar_MEGA
+from pipeline.plantas.flujo_plantas import calcular_DERIVACION
 from ui.esquemas import mostrar_esquema_planta
 from ui.mapa import panel_mapa
 from ui.tablas import panel_tablas
@@ -112,7 +133,7 @@ st.set_page_config(page_title="Balance de Gas", page_icon="🛢️",  # emoji-ok
 # Unidades: cuántas unidades de Volumen_inyectado hay en 1 MMm3/d.
 FACTOR_MM = float(getattr(config, "FACTOR_MMm3_A_UNIDAD_VOLUMEN", 1000.0))
 
-# `_actualizar_config_y_recargar` sobrescribe config.PATH_INPUTS con el path de
+# `_sincronizar_config` sobrescribe config.PATH_INPUTS con el path de
 # la corrida. Si eso pasa una vez con un archivo subido, el default de disco
 # queda perdido para siempre y la rama "sin archivo" del uploader lee el
 # tempdir. Se guarda el valor original en el primer import del proceso.
@@ -342,38 +363,48 @@ def _armar_esquema(datos: dict) -> dict:
 
 
 # ===========================================================================
-# Recarga en caliente de módulos sensibles a config.py
+# Parámetros en vivo: espejo en config + constantes por archivo (sin reload)
 # ===========================================================================
 
-def _actualizar_config_y_recargar(path, params):
+def _sincronizar_config(path, params):
+    """Espeja `params` en el módulo `config`.
+
+    Es barato (unos setattr) y hace falta porque el sandbox siembra su
+    registro de plantas leyendo `config` (ver `registro.registro_base`, que
+    acepta el módulo o el dict). No recarga ningún módulo: antes se hacían
+    siete `importlib.reload` por corrida —o sea 7 x N en la serie—, y ninguno
+    era necesario: `TTY`, `MEGA`, `planta_template` y `flujo_plantas` solo
+    hacen `import config` sin leerlo, `preprocesamiento` recibe `path_inputs`
+    explícito, y lo único que sí dependía del archivo (Constantes-GAS) ahora
+    lo resuelve `_constantes`.
+    """
     config.PATH_INPUTS = path
     for nombre, valor in params.items():
         setattr(config, nombre, valor)
 
-    import domain.ctes_gas as ctes_gas
-    importlib.reload(ctes_gas)
 
-    import pipeline.preprocesamiento as preprocesamiento
-    importlib.reload(preprocesamiento)
+@st.cache_data(show_spinner=False)
+def _constantes(path, _firma) -> SimpleNamespace:
+    """Constantes físicas del Excel de la corrida, con la forma de `domain.ctes_gas`.
 
-    import pipeline.plantas.planta_template as planta_template
-    importlib.reload(planta_template)
-
-    import pipeline.plantas.flujo_plantas as flujo_plantas
-    importlib.reload(flujo_plantas)
-
-    import pipeline.plantas.TTY as TTY
-    import pipeline.plantas.MEGA as MEGA
-    importlib.reload(TTY)
-    importlib.reload(MEGA)
-
-    return {
-        "ctes_gas": ctes_gas,
-        "preprocesamiento": preprocesamiento,
-        "flujo_plantas": flujo_plantas,
-        "TTY": TTY,
-        "MEGA": MEGA,
-    }
+    Reemplaza el `importlib.reload(ctes_gas)` que re-leía la hoja
+    Constantes-GAS en cada mes de la serie. Las listas de compuestos son
+    fijas y salen del módulo; solo P/T base, R y la conversión vienen del
+    archivo. `_firma` = (mtime, size), solo para invalidar el cache.
+    """
+    tabla = load_constantes_gas(path)
+    m = ctes_gas_modulo
+    return SimpleNamespace(
+        PRESION_BASE=float(tabla["Presion Base [kPa]"].values[0]),
+        CONSTANTE_GAS=float(tabla["Cte. GAS [m3.kPa/(K.kmol)]"].values[0]),
+        TEMPERATURA_BASE=float(tabla["Temperatura Base [°C]"].values[0]),
+        CONVERSION=float(tabla["Conversion"].values[0]),
+        DENSIDAD_AIRE=m.DENSIDAD_AIRE,
+        CONVERSION_BARRILLES_KGD=m.CONVERSION_BARRILLES_KGD,
+        MMBtu=m.MMBtu,
+        METANO=m.METANO, ETANO=m.ETANO, PROPANO=m.PROPANO,
+        BUTANOS=m.BUTANOS, GASOLINA=m.GASOLINA, COMPUESTOS=m.COMPUESTOS,
+    )
 
 
 # ===========================================================================
@@ -707,18 +738,20 @@ def _mapa_nombres_originales(path) -> dict:
     return mapa
 
 
+@st.cache_data(show_spinner=False)
 def _cargar_hojas(path, _firma):
     """Las diez lecturas del Excel, cacheadas juntas.
 
     `_firma` es (mtime, size) del archivo: entra solo para invalidar el cache si
     el excel cambia en disco. No se usa adentro.
 
+    OJO historico: el docstring siempre dijo "cacheadas" pero la funcion NO
+    tenia el decorador. Cada mes de la serie hacia las diez lecturas de nuevo
+    (10 x N aperturas del Excel con openpyxl). Ese era el costo dominante.
+
     `st.cache_data` devuelve una COPIA en cada acceso, asi que `preprocesar_inputs`
     puede seguir mutando los DataFrames in place sin contaminar el cache.
-
-    OJO: esto NO cachea la lectura que hace `domain.ctes_gas` en su import, que
-    `_actualizar_config_y_recargar` rehace con `importlib.reload` en cada corrida.
-    Mientras los modulos sigan leyendo config a nivel de modulo, esa queda afuera.
+    Constantes-GAS va aparte, en `_constantes`.
     """
     return {
         "inyeccion_9300": load_inyeccion_9300(path),
@@ -952,93 +985,128 @@ def _propiedades_corrientes(plantas, tabla_total_hubs, propiedades, compuestos,
         ctes.CONVERSION)
 
 
+@st.cache_data(show_spinner=False)
+def _etapa_comun(path, _firma) -> dict:
+    """Todo lo del pipeline que NO depende del mes, cacheado por archivo.
+
+    Antes esto corria completo en cada `ejecutar_pipeline`, o sea N veces en
+    la serie temporal, y ninguna de sus salidas cambia entre meses: dependen
+    solo del Excel. El query por periodo se hace despues, sobre `inyeccion_std`
+    y `coefs_inyeccion_area`, en las tablas totales.
+
+    Devuelve un dict con las tablas ya preprocesadas, la inyeccion std en
+    formato largo (todos los periodos), el reparto a destinos, las premisas de
+    cromatografia listas para buscar y los sufijos.
+
+    OJO: `st.cache_data` devuelve una copia en cada acceso, asi que lo que
+    consuma esto puede mutar sin contaminar el cache. Los prints de
+    diagnostico de estas funciones salen solo la primera vez por archivo; si
+    se necesita verlos, cambiar el Excel (o `st.cache_data.clear()`).
+    """
+    hojas = _cargar_hojas(path, _firma)
+    ctes = _constantes(path, _firma)
+
+    inputs = preprocesar_inputs(
+        flujos_directos=hojas["flujos_directos"],
+        yacimientos=hojas["yacimientos"],
+        detalles_hubs=hojas["detalles_hubs"],
+        propiedades=hojas["propiedades"],
+        plantas_yacimientos=hojas["plantas_yacimientos"],
+        path_inputs=path,
+    )
+
+    flujos_directos      = inputs["flujos_directos"]
+    yacimientos          = inputs["yacimientos"]
+    detalles_hubs        = inputs["detalles_hubs"]
+    propiedades          = inputs["propiedades"]
+    plantas_yacimientos  = inputs["plantas_yacimientos"]
+    matriz_inyecciones   = inputs["matriz_inyecciones"]
+    coefs_inyeccion_area = inputs["coefs_inyeccion_area"]
+    premisas_areas       = inputs["premisas_areas"]
+
+    # La hoja de premisas se parte en dos tablas de busqueda: por ruta
+    # (Area, Gasoducto) para los gasoductos, y por Area+Sufijo para las
+    # areas. `sufijos_planta` es lo que permite distinguir un duplicado que
+    # deberia estar desambiguado (Fortin de Piedra) de una inconsistencia
+    # de la hoja (Aguada de Castro, cargada dos veces con valores distintos).
+    sufijos_planta = cargar_sufijos_planta(path)
+    premisas_por_ruta, premisas_por_clave = preparar_premisas(
+        premisas_areas, ctes.COMPUESTOS, sufijos_planta)
+
+    inyeccion_std = calcular_inyeccion_std(hojas["inyeccion_9300"], hojas["coeficientes"])
+    inyeccion = calcular_inyeccion(inyeccion_std, plantas_yacimientos)
+    inyeccion_area = calcular_inyeccion_area(inyeccion, matriz_inyecciones)
+
+    inyeccion_yacimientos_areas = calcular_inyeccion_yacimientos_areas(
+        yacimientos=yacimientos,
+        plantas_yacimientos=plantas_yacimientos,
+        inyeccion_area=inyeccion_area,
+    )[1]          # devuelve (yacimientos_areas, inyeccion_yacimientos_areas)
+
+    detalles_hubs_areas = calcular_detalles_hubs_areas(
+        detalles_hubs, plantas_yacimientos)
+
+    inyeccion_flujos_directos = calcular_inyeccion_flujos_directos(
+        flujos_directos)
+
+    # El corte de la clave concatenada de Sufijos-Planta se hace por el
+    # primer guion. Esto verifica que haya dado nombres de area reales
+    # (se rompe si algun dia un area tiene guion en el nombre).
+    validar_sufijos(
+        sufijos_planta, premisas_areas,
+        [inyeccion_yacimientos_areas, inyeccion_flujos_directos])
+
+    return dict(
+        propiedades=propiedades,
+        coefs_inyeccion_area=coefs_inyeccion_area,
+        sufijos_planta=sufijos_planta,
+        premisas_por_ruta=premisas_por_ruta,
+        premisas_por_clave=premisas_por_clave,
+        inyeccion_std=inyeccion_std,
+        inyeccion_yacimientos_areas=inyeccion_yacimientos_areas,
+        detalles_hubs_areas=detalles_hubs_areas,
+        inyeccion_flujos_directos=inyeccion_flujos_directos,
+    )
+
+
 def ejecutar_pipeline(path, params, guardar_csvs, silencioso=False) -> dict:
-    # Las ampliaciones se resuelven ANTES de recargar config: el sandbox
+    # Las ampliaciones se resuelven ANTES de espejar en config: el sandbox
     # siembra su registro de plantas desde config, y si config quedara con las
     # capacidades base mientras la cascada usa las efectivas, el control del
     # tab "Plantas" daría desvío sin haber bug.
     params = _aplicar_ampliaciones(params)
+    _sincronizar_config(path, params)
 
-    mods = _actualizar_config_y_recargar(path, params)
-    ctes = mods["ctes_gas"]
-    preprocesar_inputs = mods["preprocesamiento"].preprocesar_inputs
-    modelar_TTY = mods["TTY"].modelar_TTY
-    modelar_MEGA = mods["MEGA"].modelar_MEGA
-    calcular_DERIVACION = mods["flujo_plantas"].calcular_DERIVACION
+    firma = _firma_archivo(path)
+    ctes = _constantes(path, firma)
 
     periodo = params["PERIODO_CONSIDERADO"]
     tbx_activa = bool(periodo >= params["FECHA_PM_TTY_TBX"])
 
     with _status("Cargando datos de entrada...", silencioso) as status:
-        # Cacheado por (path, mtime, size): las 24 corridas de la serie temporal
+        # Cacheado por (path, mtime, size): las N corridas de la serie temporal
         # leen el excel una sola vez en total, no una vez por mes.
-        hojas = _cargar_hojas(path, _firma_archivo(path))
-
-        inyeccion_9300 = hojas["inyeccion_9300"]
-        coeficientes = hojas["coeficientes"]
+        hojas = _cargar_hojas(path, firma)
         retenidos_rtp = hojas["retenidos_rtp"]
-        flujos_directos = hojas["flujos_directos"]
-        yacimientos = hojas["yacimientos"]
-        detalles_hubs = hojas["detalles_hubs"]
-        propiedades = hojas["propiedades"]
-        plantas_yacimientos = hojas["plantas_yacimientos"]
         status.update(label="Datos cargados ✅", state="complete")
 
     with _status("Normalizando y preprocesando...", silencioso) as status:
-        inputs = preprocesar_inputs(
-            flujos_directos=flujos_directos,
-            yacimientos=yacimientos,
-            detalles_hubs=detalles_hubs,
-            propiedades=propiedades,
-            plantas_yacimientos=plantas_yacimientos,
-            path_inputs=path,
-        )
+        # Todo lo que no depende del mes, cacheado por archivo (ver _etapa_comun).
+        comun = _etapa_comun(path, firma)
 
-        flujos_directos      = inputs["flujos_directos"]
-        yacimientos          = inputs["yacimientos"]
-        detalles_hubs        = inputs["detalles_hubs"]
-        propiedades          = inputs["propiedades"]
-        plantas_yacimientos  = inputs["plantas_yacimientos"]
-        matriz_inyecciones   = inputs["matriz_inyecciones"]
-        coefs_inyeccion_area = inputs["coefs_inyeccion_area"]
-        premisas_areas       = inputs["premisas_areas"]
-
-        # La hoja de premisas se parte en dos tablas de busqueda: por ruta
-        # (Area, Gasoducto) para los gasoductos, y por Area+Sufijo para las
-        # areas. `sufijos_planta` es lo que permite distinguir un duplicado que
-        # deberia estar desambiguado (Fortin de Piedra) de una inconsistencia
-        # de la hoja (Aguada de Castro, cargada dos veces con valores distintos).
-        sufijos_planta = cargar_sufijos_planta(path)
-        premisas_por_ruta, premisas_por_clave = preparar_premisas(
-            premisas_areas, ctes.COMPUESTOS, sufijos_planta)
-
+        propiedades                 = comun["propiedades"]
+        coefs_inyeccion_area        = comun["coefs_inyeccion_area"]
+        sufijos_planta              = comun["sufijos_planta"]
+        premisas_por_ruta           = comun["premisas_por_ruta"]
+        premisas_por_clave          = comun["premisas_por_clave"]
+        inyeccion_std               = comun["inyeccion_std"]
+        inyeccion_yacimientos_areas = comun["inyeccion_yacimientos_areas"]
+        detalles_hubs_areas         = comun["detalles_hubs_areas"]
+        inyeccion_flujos_directos   = comun["inyeccion_flujos_directos"]
         status.update(label="Preprocesamiento listo ✅", state="complete")
 
 
     with _status("Calculando inyección y tablas totales...", silencioso) as status:
-        inyeccion_std = calcular_inyeccion_std(inyeccion_9300, coeficientes)
-        inyeccion = calcular_inyeccion(inyeccion_std, plantas_yacimientos)
-        inyeccion_area = calcular_inyeccion_area(inyeccion, matriz_inyecciones)
-
-        inyeccion_yacimientos_areas = calcular_inyeccion_yacimientos_areas(
-            yacimientos=yacimientos,
-            plantas_yacimientos=plantas_yacimientos,
-            inyeccion_area=inyeccion_area,
-        )[1]          # devuelve (yacimientos_areas, inyeccion_yacimientos_areas)
-
-        detalles_hubs_areas = calcular_detalles_hubs_areas(
-            detalles_hubs, plantas_yacimientos)
-
-        inyeccion_flujos_directos = calcular_inyeccion_flujos_directos(
-            flujos_directos)
-
-        # El corte de la clave concatenada de Sufijos-Planta se hace por el
-        # primer guion. Esto verifica que haya dado nombres de area reales
-        # (se rompe si algun dia un area tiene guion en el nombre).
-        validar_sufijos(
-            sufijos_planta, premisas_areas,
-            [inyeccion_yacimientos_areas, inyeccion_flujos_directos])
-
         tabla_total_yacimientos = calcular_tabla_total_yacimientos(
             inyeccion_yacimientos_areas, inyeccion_std, coefs_inyeccion_area,
             premisas_por_ruta, premisas_por_clave, sufijos_planta,
