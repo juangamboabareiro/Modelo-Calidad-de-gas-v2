@@ -87,6 +87,7 @@ from io_.loaders import (
     load_matriz_inyecciones,
     load_cromas_hubs,
     load_constantes_gas,
+    load_coefs_inyeccion_area,
 )
 import domain.ctes_gas as ctes_gas_modulo
 from pipeline.preprocesamiento import preprocesar_inputs
@@ -449,6 +450,57 @@ else:
     input_path = PATH_INPUTS_DEFAULT
 st.sidebar.caption(f"Archivo en uso: `{Path(input_path).name}`")
 
+
+@st.cache_data(show_spinner=False)
+def _rango_periodos_disponibles(path, _firma):
+    """(primer mes, último mes) para los que el Excel tiene TODO lo necesario.
+
+    Un mes solo se puede calcular si aparece en las tres hojas que tienen una
+    columna por período: Inyeccion-9300, Coeficientes y Coefs-Iny-Areas. La
+    intersección es lo que manda; en el archivo actual las dos primeras van
+    de 2020 a 2032 pero Coefs-Iny-Areas arranca en 01-2025, y un rango que
+    empieza antes cae mes a mes en `fallos` con los gráficos vacíos.
+
+    Devuelve (None, None) si no se puede leer: el sidebar cae entonces al
+    default viejo (período considerado - 11 meses).
+    """
+    try:
+        hojas = (load_inyeccion_9300(path), load_coeficientes(path),
+                 load_coefs_inyeccion_area(path))
+    except Exception as e:  # noqa: BLE001 - el loader ya avisa; acá solo degradamos
+        print(f"[rango_periodos] no se pudo leer el excel: {e}")
+        return None, None
+
+    comunes = None
+    for hoja in hojas:
+        periodos = set()
+        for c in hoja.columns:
+            try:
+                ts = pd.Timestamp(c)
+            except (TypeError, ValueError):
+                continue
+            if pd.notna(ts):
+                periodos.add(ts.normalize())
+        comunes = periodos if comunes is None else comunes & periodos
+
+    if not comunes:
+        return None, None
+    return min(comunes), max(comunes)
+
+
+_firma_inputs = None
+try:
+    _st_ = Path(input_path).stat()
+    _firma_inputs = (_st_.st_mtime, _st_.st_size)
+except OSError:
+    pass
+PERIODO_MIN, PERIODO_MAX = _rango_periodos_disponibles(input_path, _firma_inputs)
+if PERIODO_MIN is not None:
+    _n_disp = len(pd.date_range(PERIODO_MIN, PERIODO_MAX, freq="MS"))
+    st.sidebar.caption(
+        f"Meses con datos completos: **{PERIODO_MIN:%m-%Y}** a "
+        f"**{PERIODO_MAX:%m-%Y}** ({_n_disp}).")
+
 # ---------------------------------------------------------------------------
 # Correccion de ingreso por llenar evacuacion, POR PLANTA.
 #
@@ -655,13 +707,20 @@ with st.sidebar.form("parametros", **_form_kwargs):
         "prenden solas en el mes que les corresponde. Un rango largo tarda: son "
         "N corridas completas."
     )
+    # Default: todo el rango con datos completos del Excel (ver
+    # _rango_periodos_disponibles). Antes era "período considerado - 11 meses",
+    # que con un Excel que arranca en 01-2025 caía en meses sin datos y la
+    # serie salía vacía sin que se notara por qué.
+    if PERIODO_MIN is not None:
+        _desde_default, _hasta_default = PERIODO_MIN, PERIODO_MAX
+    else:
+        _desde_default = periodo_ts - pd.DateOffset(months=11)
+        _hasta_default = periodo_ts
+
     serie_desde_str = st.text_input(
-        "Desde (MM-YYYY)",
-        value=(periodo_ts - pd.DateOffset(months=11)).strftime("%m-%Y"),
-        key="serie_desde",
-    )
+        "Desde (MM-YYYY)", value=_desde_default.strftime("%m-%Y"), key="serie_desde")
     serie_hasta_str = st.text_input(
-        "Hasta (MM-YYYY)", value=periodo_ts.strftime("%m-%Y"), key="serie_hasta")
+        "Hasta (MM-YYYY)", value=_hasta_default.strftime("%m-%Y"), key="serie_hasta")
 
     try:
         serie_desde = pd.Timestamp(serie_desde_str.replace("/", "-")).normalize()
@@ -671,10 +730,21 @@ with st.sidebar.form("parametros", **_form_kwargs):
         st.error("Rango inválido (formato MM-YYYY).")
         periodos_serie = []
 
+    # Recorte al rango con datos: los meses de afuera fallarían uno por uno
+    # y solo se verían en el expander de fallos del tab Graphs.
+    if periodos_serie and PERIODO_MIN is not None:
+        _pedidos = len(periodos_serie)
+        periodos_serie = [p for p in periodos_serie if PERIODO_MIN <= p <= PERIODO_MAX]
+        _afuera = _pedidos - len(periodos_serie)
+        if _afuera:
+            st.warning(
+                f"{_afuera} mes(es) del rango no tienen datos completos en el Excel "
+                f"(hay de {PERIODO_MIN:%m-%Y} a {PERIODO_MAX:%m-%Y}); se saltean.")
+
     if periodos_serie:
-        st.caption(f"{len(periodos_serie)} período(s) en el rango.")
+        st.caption(f"{len(periodos_serie)} período(s) a calcular.")
     else:
-        st.caption("El rango no contiene ningún inicio de mes.")
+        st.caption("El rango no contiene ningún mes con datos.")
 
     # Sin `disabled`: adentro del form no puede reaccionar a lo que tipeas, se
     # quedaria con el estado del submit anterior. El rango vacio se valida
@@ -1739,7 +1809,7 @@ if run:
         st.session_state["diagnostico"] = registro
 
 if run_serie and not periodos_serie:
-    st.sidebar.error("El rango no contiene ningún inicio de mes: no hay nada que correr.")
+    st.sidebar.error("El rango no contiene ningún mes con datos: no hay nada que correr.")
 
 elif run_serie:
     try:
